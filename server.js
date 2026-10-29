@@ -112,7 +112,7 @@ function handleSetup(body) {
     allocateMonth(state);
   } catch (error) {
     if (!(error instanceof AppError) || error.code !== 'INSUFFICIENT_FUNDS') throw error;
-    warning = `${rupeesText(error.details.shortfallPaise)} short of this month's plan. Add the salary credit or adjust the plan, then allocate.`;
+    warning = `${rupeesText(error.details.shortfallPaise)} short of this month's plan. Add the salary or change the plan, then divide again.`;
   }
 
   store.set(state);
@@ -203,7 +203,7 @@ function handleIngest(req, url, body) {
   const adjustment =
     targetBalancePaise === null
       ? null
-      : reconcileBalance(state, targetBalancePaise, 'Auto-synced from alert balance');
+      : reconcileBalance(state, targetBalancePaise, 'Auto-corrected from bank alert');
 
   store.save();
   return stateResponse({ duplicate: false, transaction, adjustment });

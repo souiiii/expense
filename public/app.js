@@ -29,6 +29,7 @@ const ICONS = {
   plan: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h8"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M12 17h8"/><circle cx="9.5" cy="17" r="2"/></svg>`,
   transactions: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16"/><path d="M4 12h16"/><path d="M4 17.5h11"/><circle cx="19.5" cy="17.5" r="1.1" fill="currentColor" stroke="none"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v2.1M12 19.3v2.1M4.6 4.6l1.5 1.5M17.9 17.9l1.5 1.5M2.6 12h2.1M19.3 12h2.1M4.6 19.4l1.5-1.5M17.9 6.1l1.5-1.5"/></svg>`,
+  help: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.6 2.6 0 1 1 3.4 2.5c-.9.3-1.4 1-1.4 1.9v.3"/><circle cx="11.4" cy="17.2" r=".9" fill="currentColor" stroke="none"/></svg>`,
 };
 
 const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="6" width="26" height="6" rx="3" fill="currentColor" opacity=".96"/><rect x="3" y="14.5" width="19" height="6" rx="3" fill="currentColor" opacity=".55"/><rect x="3" y="23" width="23" height="6" rx="3" fill="currentColor" opacity=".3"/></svg>`;
@@ -174,21 +175,21 @@ function setupView() {
       ${brandMarkup()}
       <p class="eyebrow" style="margin-top:34px">Start here</p>
       <h1>Salary,<br /><em>divided.</em></h1>
-      <p class="lede">One bank balance. Fixed commitments first, percentages for everything else, and rollover for what you save up for.</p>
+      <p class="lede">Your bank has one balance. This app puts labels on parts of it — bills first, then everyday spending. Leftovers for clothes and electronics carry forward.</p>
       <form data-form="setup" autocomplete="off">
         <label class="field">
-          <span>Monthly take-home</span>
+          <span>Monthly salary (take-home)</span>
           <div class="money-input"><span>₹</span><input name="income" type="number" min="0" step="100" value="100000" inputmode="numeric" required /></div>
         </label>
         <label class="field">
-          <span>What is in your bank right now?</span>
+          <span>Money in your bank right now</span>
           <div class="money-input"><span>₹</span><input name="balance" type="number" min="0" step="100" value="" placeholder="e.g. 52000" inputmode="numeric" required /></div>
         </label>
-        <p class="hint">Use the real balance. If salary hasn't landed yet, enter what's there now — you can allocate when it arrives.</p>
-        <button class="btn primary wide" type="submit">Start budgeting</button>
+        <p class="hint">Use your real bank balance. If salary hasn't arrived yet, enter what's there now — you can divide it when the salary lands.</p>
+        <button class="btn primary wide" type="submit">Start</button>
       </form>
       <div class="setup-alt">
-        <button class="link-btn" type="button" data-action="demo-setup">Or explore with demo data →</button>
+        <button class="link-btn" type="button" data-action="demo-setup">See an example first →</button>
       </div>
       <p class="fine">Everything lives in <code>data/store.json</code> on this computer. No bank login, no cloud.</p>
     </div>
@@ -201,10 +202,11 @@ function shellView() {
     <aside class="sidebar">
       ${brandMarkup()}
       <nav class="nav" aria-label="Main">
-        ${navItem('dashboard', 'Overview')}
+        ${navItem('dashboard', 'Home')}
         ${navItem('plan', 'Plan')}
         ${navItem('transactions', 'Transactions')}
         ${navItem('settings', 'Settings')}
+        <button class="nav-item help-item" data-action="open-help">${ICONS.help}<span>How to use</span></button>
       </nav>
       <div class="sidebar-foot">
         <div class="side-balance">
@@ -219,13 +221,16 @@ function shellView() {
     <main class="main">
       <header class="mobile-head">
         ${brandMarkup(true)}
-        <button class="btn primary small" data-action="open-tx">+ Spend</button>
+        <div class="mobile-actions">
+          <button class="icon-btn help-btn" data-action="open-help" aria-label="How to use">?</button>
+          <button class="btn primary small" data-action="open-tx">+ Spend</button>
+        </div>
       </header>
       <div class="view">${viewMarkup()}</div>
     </main>
 
     <nav class="bottom-nav" aria-label="Main">
-      ${navItem('dashboard', 'Overview')}
+      ${navItem('dashboard', 'Home')}
       ${navItem('plan', 'Plan')}
       ${navItem('transactions', 'Activity')}
       ${navItem('settings', 'Settings')}
@@ -265,20 +270,20 @@ function dashboardView() {
   return `<section class="hero">
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="hero-main">
-      <p class="eyebrow light">In your bank · ${monthLabel(derived.period)}</p>
+      <p class="eyebrow light">Money in your bank · ${monthLabel(derived.period)}</p>
       <h1 class="balance">${money(derived.bankBalancePaise)}</h1>
-      <p class="hero-sub">${money(derived.allocatedPaise)} divided across ${categories.length} envelopes${
+      <p class="hero-sub">${money(derived.allocatedPaise)} is divided into ${categories.length} buckets${
         derived.unallocatedPaise !== 0
           ? ` · <span class="${derived.unallocatedPaise < 0 ? 'hero-neg' : ''}">${money(
               derived.unallocatedPaise
-            )} unallocated</span>`
+            )} not divided yet</span>`
           : ''
       }</p>
     </div>
     <div class="hero-actions">
       <button class="btn primary light" data-action="open-tx">Add expense</button>
       <button class="btn hero-ghost" data-action="open-move">Move money</button>
-      <button class="btn hero-ghost" data-action="open-reconcile">Reconcile</button>
+      <button class="btn hero-ghost" data-action="open-reconcile">Check balance</button>
     </div>
   </section>
 
@@ -286,24 +291,24 @@ function dashboardView() {
 
   <div class="stats">
     ${statCard('Spent this month', money(summary.spentPaise), `${summary.transactionCount} transaction${summary.transactionCount === 1 ? '' : 's'}`)}
-    ${statCard('Moved to assets', money(summary.investedPaise), 'SIPs and transfers out')}
+    ${statCard('Invested', money(summary.investedPaise), 'Money moved to SIPs and FDs')}
     ${statCard(
-      'Unallocated',
+      'Not divided',
       money(derived.unallocatedPaise),
-      derived.allocation ? 'Outside the envelopes' : 'Waiting to be divided',
+      derived.allocation ? 'Money without a bucket' : 'Waiting to be divided',
       derived.unallocatedPaise < 0 ? 'negative' : derived.unallocatedPaise > 0 ? 'warm' : ''
     )}
   </div>
 
-  ${envelopeSection('Commitments', 'Rent, EMI, investing — funded first.', fixed, targets, summary)}
-  ${envelopeSection('Everyday', 'What is left, split by percentage.', flexible, targets, summary)}
+  ${envelopeSection('Bills & savings', 'Rent, EMI, investing and emergency. Same every month.', fixed, targets, summary)}
+  ${envelopeSection('Spending', 'These split what is left, by percentage.', flexible, targets, summary)}
 
   <section class="panel recents">
     <div class="panel-head">
-      <div><h2>Recent activity</h2><p>The last few movements through your accounts.</p></div>
+      <div><h2>Recent transactions</h2><p>Your latest money movements.</p></div>
       <button class="link-btn" data-action="nav" data-view="transactions">View all →</button>
     </div>
-    ${txList(app.data.transactions.slice(0, 6), 'No transactions yet. Add one, or send a bank alert to the ingest endpoint.')}
+    ${txList(app.data.transactions.slice(0, 6), 'No transactions yet. Add your first one.')}
   </section>`;
 }
 
@@ -344,15 +349,15 @@ function envelopeCard(category, target, spent, moved) {
   const over = balance < 0;
   const rollMeta = category.rollover
     ? category.capPaise !== null && category.capPaise !== undefined
-      ? `Rolls over · cap ${money(category.capPaise)}`
-      : 'Rolls over'
-    : 'Resets monthly';
+      ? `Leftover stays · max ${money(category.capPaise)}`
+      : 'Leftover stays'
+    : 'Resets next month';
 
   return `<article class="env-card ${over ? 'is-over' : ''}" style="--accent:${esc(category.color)}">
     <div class="env-head">
       <span class="env-icon" style="background:${esc(category.color)}1f">${esc(category.icon)}</span>
       <div class="env-title"><h3>${esc(category.name)}</h3><span>${rollMeta}</span></div>
-      <button class="icon-btn add" data-action="open-tx" data-category="${esc(category.id)}" data-kind="expense" title="Log an expense from ${esc(category.name)}" aria-label="Log an expense from ${esc(category.name)}">+</button>
+      <button class="icon-btn add" data-action="open-tx" data-category="${esc(category.id)}" data-kind="expense" title="Add expense from ${esc(category.name)}" aria-label="Add expense from ${esc(category.name)}">+</button>
     </div>
     <div class="env-amount">${money(balance)}</div>
     <div class="env-target">of ${target > 0 ? money(target) : 'no target'} ${
@@ -362,14 +367,14 @@ function envelopeCard(category, target, spent, moved) {
     <div class="env-foot">
       <span>${
         moved > 0
-          ? `Moved ${money(moved)} out`
+          ? `${money(moved)} invested`
           : spent > 0
-            ? `Spent ${money(spent)} this month`
-            : 'Nothing spent yet'
+            ? `Spent ${money(spent)}`
+            : 'No spending yet'
       }</span>
       ${
         over
-          ? `<button class="link-btn danger" data-action="open-move" data-to="${esc(category.id)}">Cover gap</button>`
+          ? `<button class="link-btn danger" data-action="open-move" data-to="${esc(category.id)}">Cover shortage</button>`
           : ''
       }
     </div>
@@ -381,28 +386,28 @@ function allocationNotice(derived) {
 
   if (unallocated < 0) {
     return `<div class="notice danger">
-      <div class="notice-copy"><strong>Your envelopes are overdrawn by ${money(-unallocated)}.</strong><span>Move money from another envelope to cover the gap.</span></div>
+      <div class="notice-copy"><strong>Your buckets are short by ${money(-unallocated)}.</strong><span>Move money from another bucket to cover it.</span></div>
       <div class="notice-actions"><button class="btn ghost" data-action="open-move">Move money</button></div>
     </div>`;
   }
 
   if (!derived.allocation && unallocated > 0) {
     return `<div class="notice warn">
-      <div class="notice-copy"><strong>${money(unallocated)} is waiting to be divided.</strong><span>Run ${monthLabel(derived.period)}'s allocation to fill each envelope to its target.</span></div>
-      <div class="notice-actions"><button class="btn primary" data-action="open-allocate">Allocate ${monthLabel(derived.period)}</button></div>
+      <div class="notice-copy"><strong>${money(unallocated)} is ready to divide.</strong><span>Press once to put this month's money into your buckets.</span></div>
+      <div class="notice-actions"><button class="btn primary" data-action="open-allocate">Divide this month's salary</button></div>
     </div>`;
   }
 
   if (!derived.allocation && unallocated === 0) {
     return `<div class="notice quiet">
-      <div class="notice-copy"><strong>Nothing unallocated yet.</strong><span>When your salary lands, record it as income and allocate it.</span></div>
+      <div class="notice-copy"><strong>No money to divide yet.</strong><span>When your salary lands, add it here and divide it.</span></div>
       <div class="notice-actions"><button class="btn ghost" data-action="open-tx" data-kind="income">Add income</button></div>
     </div>`;
   }
 
   if (derived.allocation && unallocated > 0) {
     return `<div class="notice warn">
-      <div class="notice-copy"><strong>${money(unallocated)} is unallocated.</strong><span>This month is already allocated. Move the extra into an envelope.</span></div>
+      <div class="notice-copy"><strong>${money(unallocated)} is not in a bucket yet.</strong><span>This month is already divided. Move the extra into a bucket.</span></div>
       <div class="notice-actions"><button class="btn ghost" data-action="open-move">Move money</button></div>
     </div>`;
   }
@@ -449,10 +454,10 @@ function txRow(transaction) {
 function kindLabel(kind) {
   return (
     {
-      expense: 'Expense',
-      income: 'Income',
-      transfer: 'Transfer to asset',
-      adjustment: 'Balance adjustment',
+      expense: 'Spending',
+      income: 'Money in',
+      transfer: 'Investment',
+      adjustment: 'Balance fix',
     }[kind] || kind
   );
 }
@@ -470,70 +475,77 @@ function planView() {
   const fixed = categories.filter((category) => category.kind === 'fixed');
   const flexible = categories.filter((category) => category.kind === 'flex');
   const allocation = derived.allocation;
+  const canDivide = derived.unallocatedPaise > 0;
   const settings = app.data.settings;
   const surplusOptions = categories
     .map(
       (category) =>
         `<option value="${esc(category.id)}" ${
           category.id === settings.surplusCategoryId ? 'selected' : ''
-        }>${esc(category.name)}${category.rollover ? '' : ' (resets)'}</option>`
+        }>${esc(category.name)}${category.rollover ? '' : ' (starts fresh)'}</option>`
     )
     .join('');
 
   return `<div class="page-head">
     <div>
-      <p class="eyebrow">The plan</p>
+      <p class="eyebrow">Your monthly plan</p>
       <h1>Monthly plan</h1>
-      <p class="lede">Fixed commitments first. The rest is split by percentage. Change it once, and every payday follows it.</p>
+      <p class="lede">Set this once. Bills and savings are set aside first, then the rest is split across spending buckets by percentage.</p>
     </div>
-    <button class="btn ghost" data-action="nav" data-view="dashboard">Back to overview</button>
+    <button class="btn ghost" data-action="nav" data-view="dashboard">Back to home</button>
   </div>
 
   <div class="status-card ${allocation ? 'ok' : 'warn'}">
     <div>
-      <strong>${allocation ? `${monthLabel(derived.period)} is allocated` : `${monthLabel(derived.period)} is not allocated yet`}</strong>
+      <strong>${allocation ? `${monthLabel(derived.period)} is divided` : `${monthLabel(derived.period)} is not divided yet`}</strong>
       <span>${
         allocation
-          ? `Funded ${money(allocation.fundedPaise)} · ${money(allocation.surplusPaise)} swept to surplus`
-          : 'Fill each envelope from the money sitting in your bank.'
+          ? `Divided ${money(allocation.fundedPaise)} · ${money(allocation.surplusPaise)} extra went to ${esc(
+              categoryById(settings.surplusCategoryId)?.name || 'Emergency'
+            )}`
+          : canDivide
+            ? 'Divide this month\'s money into your buckets.'
+            : 'Add your salary on Home first. Then divide it.'
       }</span>
     </div>
     ${
       allocation
         ? allocation.canUndo
-          ? `<button class="btn ghost" data-action="undo-allocation">Undo allocation</button>`
-          : `<span class="status-note">Spending recorded. Use Move money to adjust envelopes.</span>`
-        : `<button class="btn primary" data-action="open-allocate">Allocate now</button>`
+          ? `<button class="btn ghost" data-action="undo-allocation">Undo division</button>`
+          : `<span class="status-note">Spending recorded. Use Move money to adjust your buckets.</span>`
+        : canDivide
+          ? `<button class="btn primary" data-action="open-allocate">Divide now</button>`
+          : `<button class="btn ghost" data-action="nav" data-view="dashboard">Go home</button>`
     }
   </div>
 
   <form id="plan-form" data-form="plan" autocomplete="off">
     <div class="plan-controls">
       <label class="field">
-        <span>Monthly take-home</span>
+        <span>Monthly salary (take-home)</span>
         <div class="money-input"><span>₹</span><input name="income" type="number" min="0" step="100" value="${rupeesInput(
           settings.monthlyIncomePaise
         )}" inputmode="numeric" /></div>
       </label>
       <label class="field">
-        <span>Salary day</span>
+        <span>Salary date</span>
         <input name="payday" type="number" min="1" max="28" value="${settings.paydayDay}" />
       </label>
       <label class="field">
-        <span>Surplus goes to</span>
+        <span>Extra money goes to</span>
         <select name="surplus">${surplusOptions}</select>
       </label>
     </div>
 
     <div class="plan-summary" id="plan-summary"></div>
 
-    ${planSection('fixed', 'Commitments', 'Fixed rupee amounts, funded before anything else.', fixed, targets)}
-    ${planSection('flex', 'Everyday', 'These split the flexible pool by percentage.', flexible, targets)}
+    ${planSection('fixed', 'Bills & savings', 'Rent, EMI, investing and emergency. Same every month.', fixed, targets)}
+    ${planSection('flex', 'Spending buckets', 'These split what is left, by percentage.', flexible, targets)}
 
-    <p class="plan-note">Changing the plan does not rewrite this month's envelopes. It takes effect the next time you allocate.</p>
+    <p class="plan-note">Changing the plan only affects next month. It does not move this month's money.</p>
 
     <div class="savebar" id="savebar" hidden>
-      <div><strong>Unsaved changes</strong><span>Applied at the next allocation.</span></div>
+      <div><strong>Unsaved changes</strong><span>Takes effect next month.</span></div>
       <div class="savebar-actions">
         <button type="button" class="btn ghost" data-action="discard-plan">Discard</button>
         <button type="submit" class="btn primary" id="save-plan-btn">Save plan</button>
@@ -547,12 +559,12 @@ function planSection(kind, title, subtitle, categories, targets) {
     <div class="plan-section-head">
       <div><h2>${title}</h2><span>${subtitle}</span></div>
       <button type="button" class="link-btn" data-action="add-row" data-kind="${kind}">+ Add ${
-        kind === 'fixed' ? 'commitment' : 'envelope'
+        kind === 'fixed' ? 'fixed amount' : 'bucket'
       }</button>
     </div>
     <div class="plan-table" data-kind="${kind}">
       <div class="plan-head">
-        <span>Envelope</span><span>${kind === 'fixed' ? 'Monthly' : 'Share'}</span><span>Target</span><span>Roll</span><span>Cap</span><span></span>
+        <span>Bucket</span><span>${kind === 'fixed' ? 'Amount' : 'Share'}</span><span>Gets</span><span>Keep</span><span>Max</span><span></span>
       </div>
       <div class="plan-rows">
         ${categories
@@ -575,7 +587,7 @@ function planRow(category, target) {
       <button type="button" class="env-icon sm" style="background:${esc(color)}1f" data-action="cycle-icon" title="Change icon">${esc(
         category.icon || '🏷️'
       )}</button>
-      <input name="name" value="${esc(category.name || '')}" placeholder="Envelope name" maxlength="40" aria-label="Envelope name" />
+      <input name="name" value="${esc(category.name || '')}" placeholder="Bucket name" maxlength="40" aria-label="Bucket name" />
     </div>
     <div class="plan-input">
       ${
@@ -585,23 +597,23 @@ function planRow(category, target) {
             )}" aria-label="Monthly amount" />`
           : `<input name="percent" type="number" min="0" max="100" step="0.5" value="${formatPercent(
               category.percent
-            )}" aria-label="Percentage of flexible pool" /><span class="affix">%</span>`
+            )}" aria-label="Percentage of spending money" /><span class="affix">%</span>`
       }
     </div>
-    <div class="plan-target" data-target>${isFixed ? '<span class="muted">fixed</span>' : money(target)}</div>
-    <label class="check"><input type="checkbox" name="rollover" ${
+    <div class="plan-target" data-target>${isFixed ? '<span class="muted">same</span>' : money(target)}</div>
+    <label class="check" title="Keep leftover money for next month"><input type="checkbox" name="rollover" ${
       category.rollover ? 'checked' : ''
-    } /><span>Roll</span></label>
+    } /><span>Keep</span></label>
     <div class="plan-input cap">
       <span class="affix">₹</span><input name="cap" type="number" min="0" step="100" value="${
         category.capPaise !== null && category.capPaise !== undefined
           ? rupeesInput(category.capPaise)
           : ''
-      }" placeholder="No cap" aria-label="Rollover cap" />
+      }" placeholder="No max" aria-label="Maximum balance" />
     </div>
     <button type="button" class="icon-btn danger" data-action="remove-row" ${
       category.balancePaise !== 0 ? 'disabled title="Move the balance out first"' : ''
-    } aria-label="Remove ${esc(category.name || 'envelope')}">×</button>
+    } aria-label="Remove ${esc(category.name || 'bucket')}">×</button>
   </div>`;
 }
 
@@ -648,13 +660,13 @@ function updatePlanPreview() {
     const flexWidth = income > 0 ? Math.min(100 - fixedWidth, (flexTotal / income) * 100) : 0;
     const statusClass = percentOk && !overIncome && incomeOk ? 'ok' : 'bad';
     const statusText = !incomeOk
-      ? 'Enter your monthly take-home.'
+      ? 'Enter your monthly salary.'
       : overIncome
-        ? `Fixed commitments are ${money(fixedTotal - income)} more than your income.`
+        ? `Your bills are ${money(fixedTotal - income)} more than your salary.`
         : !percentOk
-          ? `Flexible envelopes add up to ${formatPercent(percentTotal)}%. They must add up to 100%.`
-          : `Fixed ${money(fixedTotal)} + flexible ${money(flexTotal)} = ${money(planned)}. ${
-              unplanned === 0 ? 'Every rupee planned.' : `${money(unplanned)} unplanned.`
+          ? `Your spending percentages add up to ${formatPercent(percentTotal)}%. They need to equal 100%.`
+          : `Bills & savings ${money(fixedTotal)} + spending ${money(flexTotal)} = ${money(planned)}. ${
+              unplanned === 0 ? 'Every rupee is planned.' : `${money(unplanned)} is not planned.`
             }`;
 
     summary.innerHTML = `<div class="alloc-bar" aria-hidden="true">
@@ -662,9 +674,9 @@ function updatePlanPreview() {
       <span style="width:${flexWidth}%;background:#23735f"></span>
     </div>
     <div class="alloc-legend">
-      <span><i style="background:#b4643c"></i>Fixed ${money(fixedTotal)}</span>
-      <span><i style="background:#23735f"></i>Flexible ${money(flexTotal)}</span>
-      <span><i class="unplanned"></i>Unplanned ${money(Math.max(0, unplanned))}</span>
+      <span><i style="background:#b4643c"></i>Bills & savings ${money(fixedTotal)}</span>
+      <span><i style="background:#23735f"></i>Spending ${money(flexTotal)}</span>
+      <span><i class="unplanned"></i>Not planned ${money(Math.max(0, unplanned))}</span>
     </div>
     <div class="alloc-status ${statusClass}">${statusText}</div>`;
   }
@@ -708,7 +720,7 @@ function removePlanRow(button) {
   const row = button.closest('.plan-row');
   if (!row) return;
   if (Number(row.dataset.balance) !== 0) {
-    toast('Move the money out of this envelope before removing it.', 'error');
+    toast('Move the money out of this bucket before removing it.', 'error');
     return;
   }
   row.remove();
@@ -749,16 +761,16 @@ function transactionsView() {
   const transactions = app.data.transactions;
   const filters = [
     ['all', 'All'],
-    ['expense', 'Expenses'],
-    ['income', 'Income'],
-    ['transfer', 'Transfers'],
+    ['expense', 'Spending'],
+    ['income', 'Money in'],
+    ['transfer', 'Invested'],
   ];
 
   return `<div class="page-head">
     <div>
-      <p class="eyebrow">The ledger</p>
+      <p class="eyebrow">History</p>
       <h1>Transactions</h1>
-      <p class="lede">Everything that moved in or out of your bank, and which envelope it touched.</p>
+      <p class="lede">Everything that moved in or out of your bank, and which bucket it belongs to.</p>
     </div>
     <button class="btn primary" data-action="open-tx">Add transaction</button>
   </div>
@@ -772,7 +784,7 @@ function transactionsView() {
         )
         .join('')}
     </div>
-    <input id="tx-search" type="search" placeholder="Search description or envelope" value="${esc(
+    <input id="tx-search" type="search" placeholder="Search description or bucket" value="${esc(
       app.txSearch
     )}" />
   </div>
@@ -781,7 +793,7 @@ function transactionsView() {
 
   ${
     transactions.length === 0
-      ? `<div class="empty large"><span>◎</span><p>No transactions yet.</p><small>Add one, or wire a bank alert to the ingest endpoint in Settings.</small></div>`
+      ? `<div class="empty large"><span>◎</span><p>No transactions yet.</p><small>Add your first one to get started.</small></div>`
       : `<div class="panel tx-panel">${txList(
           transactions,
           ''
@@ -830,71 +842,75 @@ function settingsView() {
   return `<div class="page-head">
     <div>
       <p class="eyebrow">Settings</p>
-      <h1>Setup &amp; data</h1>
-      <p class="lede">Your ledger is a single file on this computer. The only way in is this app and the token below.</p>
+      <h1>Settings</h1>
+      <p class="lede">Your plan, your data, and optional automation.</p>
     </div>
+    <button class="btn ghost" data-action="open-help">How to use</button>
   </div>
 
   <div class="settings-grid">
     <section class="panel">
-      <div class="panel-head"><div><h2>Monthly plan</h2><p>What payday follows.</p></div></div>
+      <div class="panel-head"><div><h2>Your plan</h2><p>What each salary follows.</p></div></div>
       <dl class="kv">
-        ${kv('Take-home', money(settings.monthlyIncomePaise))}
-        ${kv('Salary day', `Day ${settings.paydayDay}`)}
-        ${kv('Fixed commitments', money(derived.plan.fixedTotalPaise))}
-        ${kv('Flexible pool', money(derived.plan.flexPoolPaise))}
-        ${kv('Surplus goes to', esc(categoryById(settings.surplusCategoryId)?.name || 'Unallocated'))}
+        ${kv('Salary', money(settings.monthlyIncomePaise))}
+        ${kv('Salary date', `Day ${settings.paydayDay}`)}
+        ${kv('Bills & savings', money(derived.plan.fixedTotalPaise))}
+        ${kv('Spending money', money(derived.plan.flexPoolPaise))}
+        ${kv('Extra goes to', esc(categoryById(settings.surplusCategoryId)?.name || 'Not set'))}
       </dl>
       <button class="btn ghost wide" data-action="nav" data-view="plan">Edit plan</button>
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>Bank balance</h2><p>The app's current view.</p></div></div>
+      <div class="panel-head"><div><h2>Bank balance</h2><p>What the app currently thinks.</p></div></div>
       <p class="big-money">${money(derived.bankBalancePaise)}</p>
-      <p class="hint">${money(derived.allocatedPaise)} sits in envelopes, ${money(
+      <p class="hint">${money(derived.allocatedPaise)} is in buckets. ${money(
         derived.unallocatedPaise
-      )} is unallocated.</p>
-      <button class="btn ghost wide" data-action="open-reconcile">Reconcile with the bank</button>
+      )} is not divided.</p>
+      <button class="btn ghost wide" data-action="open-reconcile">Check bank balance</button>
     </section>
 
     <section class="panel wide">
-      <div class="panel-head"><div><h2>Automatic updates</h2><p>Send bank or UPI alerts here and the app updates itself.</p></div></div>
-      <p class="hint">Works with iPhone Shortcuts, Android Tasker/MacroDroid, or any script that can POST JSON. If the alert includes the available balance, the app also reconciles itself to it.</p>
+      <div class="panel-head"><div><h2>Optional: automatic updates</h2><p>For later, when you want bank alerts to fill the app for you.</p></div></div>
+      <details class="advanced">
+        <summary>Set up bank alerts</summary>
+        <p class="hint">Works with iPhone Shortcuts, Android Tasker/MacroDroid, or any script that can send JSON. If the alert includes your available balance, the app matches itself to it.</p>
 
-      <div class="code-line">
-        <span class="code-label">Endpoint</span>
-        <code>${esc(endpoint)}</code>
-        <button class="mini-btn" data-action="copy" data-copy="endpoint">Copy</button>
-      </div>
-      <div class="code-line">
-        <span class="code-label">Token</span>
-        <code class="token">${esc(token)}</code>
-        <button class="mini-btn" data-action="copy" data-copy="token">Copy</button>
-      </div>
-      <div class="code-line">
-        <span class="code-label">Rotate</span>
-        <span class="hint inline">If the token leaks, replace it. Old automations will stop working.</span>
-        <button class="mini-btn" data-action="rotate-token">New token</button>
-      </div>
+        <div class="code-line">
+          <span class="code-label">Endpoint</span>
+          <code>${esc(endpoint)}</code>
+          <button class="mini-btn" data-action="copy" data-copy="endpoint">Copy</button>
+        </div>
+        <div class="code-line">
+          <span class="code-label">Token</span>
+          <code class="token">${esc(token)}</code>
+          <button class="mini-btn" data-action="copy" data-copy="token">Copy</button>
+        </div>
+        <div class="code-line">
+          <span class="code-label">Rotate</span>
+          <span class="hint inline">If the token leaks, replace it. Old automations will stop working.</span>
+          <button class="mini-btn" data-action="rotate-token">New token</button>
+        </div>
 
-      <pre class="snippet"><code>${esc(curl)}</code></pre>
+        <pre class="snippet"><code>${esc(curl)}</code></pre>
 
-      <details class="how">
-        <summary>How to automate it</summary>
-        <p><strong>iPhone:</strong> Shortcuts → Automation → when you receive an SMS or email from your bank → Get Text → Get Contents of URL → POST the endpoint above with the token header and a JSON body.</p>
-        <p><strong>Android:</strong> Tasker or MacroDroid → notification received from your bank/UPI app → HTTP POST the same JSON. The notification listener is the closest thing to instant updates.</p>
-        <p><strong>Security:</strong> the server listens on <code>127.0.0.1</code> by default. To reach it from your phone, run with <code>HOST=0.0.0.0 npm start</code> and use your Mac's LAN address. Keep the token private; it can write to your ledger.</p>
+        <details class="how">
+          <summary>How to automate it</summary>
+          <p><strong>iPhone:</strong> Shortcuts → Automation → when you receive an SMS or email from your bank → Get Text → Get Contents of URL → POST the endpoint above with the token header and a JSON body.</p>
+          <p><strong>Android:</strong> Tasker or MacroDroid → notification received from your bank/UPI app → HTTP POST the same JSON. The notification listener is the closest thing to instant updates.</p>
+          <p><strong>Security:</strong> the server listens on <code>127.0.0.1</code> by default. To reach it from your phone, run with <code>HOST=0.0.0.0 npm start</code> and use your Mac's LAN address. Keep the token private; it can write to your data.</p>
+        </details>
       </details>
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>Backup</h2><p>A readable JSON copy.</p></div></div>
+      <div class="panel-head"><div><h2>Backup</h2><p>Download a copy of everything.</p></div></div>
       <p class="hint">Everything is in <code>data/store.json</code>, with the previous version in <code>data/store.json.bak</code>.</p>
       <a class="btn ghost wide" href="/api/export" download>Download backup</a>
     </section>
 
     <section class="panel danger-zone">
-      <div class="panel-head"><div><h2>Danger zone</h2><p>These replace your current ledger.</p></div></div>
+      <div class="panel-head"><div><h2>Reset</h2><p>These replace your current data.</p></div></div>
       <button class="btn ghost wide" data-action="load-demo">Load demo data</button>
       <button class="btn danger wide" data-action="reset-all">Start over</button>
     </section>
@@ -1010,9 +1026,9 @@ function openTxModal({ id, categoryId, kind } = {}) {
 
   const body = `<form data-form="tx" data-id="${esc(transaction?.id || '')}">
     <div class="seg" role="radiogroup" aria-label="Type">
-      ${typeOption('expense', 'Expense', initialType)}
-      ${typeOption('income', 'Income', initialType)}
-      ${typeOption('transfer', 'Transfer', initialType)}
+      ${typeOption('expense', 'Spent', initialType)}
+      ${typeOption('income', 'Received', initialType)}
+      ${typeOption('transfer', 'Invested', initialType)}
       ${typeOption('refund', 'Refund', initialType)}
     </div>
 
@@ -1036,7 +1052,7 @@ function openTxModal({ id, categoryId, kind } = {}) {
         <input name="date" type="date" value="${transaction?.date || todayStr()}" required />
       </label>
       <label class="field" data-field="category">
-        <span data-cat-label>Envelope</span>
+        <span data-cat-label>Bucket</span>
         <select name="categoryId">${categoryOptions(categories, selectedCategory)}</select>
       </label>
     </div>
@@ -1067,8 +1083,8 @@ function openTxModal({ id, categoryId, kind } = {}) {
     modalShell({
       title: transaction ? 'Edit transaction' : 'Add transaction',
       subtitle: transaction
-        ? 'Changes update the envelope immediately.'
-        : 'Every rupee needs a home.',
+        ? 'Changes update the bucket immediately.'
+        : 'Money in, money out, or money moved.',
       body,
     }),
     '#modal-root [data-form="tx"] [name="amount"]'
@@ -1083,19 +1099,63 @@ function openAdjustmentModal(transaction) {
     ${kv('Direction', transaction.direction === 'in' ? 'Added to bank balance' : 'Removed from bank balance')}
     ${kv('Note', esc(transaction.notes || '—'))}
   </dl>
-  <p class="hint">This came from <strong>Reconcile</strong>. It is not spending and does not belong to an envelope. Deleting it moves the app's balance away from the envelopes.</p>
+  <p class="hint">This came from <strong>Check bank balance</strong>. It is not spending and does not belong to a bucket. Deleting it moves the app's balance away from the buckets.</p>
   <div class="modal-actions">
     <span></span>
     <div>
       <button class="btn ghost" data-action="close-modal">Close</button>
-      <button class="btn danger" data-action="delete-tx" data-id="${esc(transaction.id)}">Delete adjustment</button>
+      <button class="btn danger" data-action="delete-tx" data-id="${esc(transaction.id)}">Delete</button>
     </div>
   </div>`;
   openModal(
     modalShell({
-      title: 'Balance adjustment',
+      title: 'Balance fix',
       subtitle: 'A correction, not an expense.',
       body,
+    })
+  );
+}
+
+function openHelpModal() {
+  const body = `
+    <div class="help-steps">
+      <div class="help-step"><span>1</span><div><strong>Salary day</strong><p>Press <b>Add income</b>, enter the salary, then press <b>Divide salary</b>. Do this once a month, after the full salary is in.</p></div></div>
+      <div class="help-step"><span>2</span><div><strong>When you spend</strong><p>Press <b>Add expense</b>, enter the amount, and choose a bucket. The app subtracts it from that bucket.</p></div></div>
+      <div class="help-step"><span>3</span><div><strong>If the big number looks wrong</strong><p>Press <b>Check bank balance</b> and type what your bank app shows. The app fixes the difference.</p></div></div>
+      <div class="help-step"><span>4</span><div><strong>Next month</strong><p>Add the new salary and divide it again. Clothes and electronics keep their leftovers; groceries and fun start fresh.</p></div></div>
+    </div>
+
+    <div class="help-note"><strong>The app does not move your money.</strong> Your bank has one balance. The app puts labels on parts of it. Those labels are called <strong>buckets</strong>.</div>
+    <p class="hint">If you set up after your salary already landed, don't add it again — it is already in your bank balance.</p>
+
+    <h3 class="help-title">Words you will see</h3>
+    <dl class="glossary">
+      <div><dt>Bucket</dt><dd>A labelled part of your money, like Rent, Food, or Clothes.</dd></div>
+      <div><dt>Bills & savings</dt><dd>Rent, EMI, investing and emergency. Same amount every month.</dd></div>
+      <div><dt>Spending</dt><dd>The rest, split by percentage across everyday buckets.</dd></div>
+      <div><dt>Divide salary</dt><dd>Press once on payday to fill all the buckets.</dd></div>
+      <div><dt>Not divided</dt><dd>Money in your bank that is not in a bucket yet.</dd></div>
+      <div><dt>Keep leftover</dt><dd>That bucket's leftover stays for next month. Otherwise it starts fresh.</dd></div>
+      <div><dt>Max</dt><dd>The most a bucket can build up before extra money goes to Emergency.</dd></div>
+      <div><dt>Extra</dt><dd>Money left after every bucket is full. It goes to Emergency by default.</dd></div>
+    </dl>
+
+    <details class="help-more">
+      <summary>What happens to leftover money?</summary>
+      <p>Clothes and Electronics keep their leftover up to their Max. If Clothes has ₹1,000 left and next month adds ₹4,000, it becomes ₹5,000. Groceries, Transport, Fun and Misc start fresh each month, so unused money does not pile up forever.</p>
+    </details>
+    <details class="help-more">
+      <summary>Do I have to use every feature?</summary>
+      <p>No. For normal use you only need Add income, Divide salary, Add expense, and Check bank balance. Investments, refunds, automation and the plan editor are optional.</p>
+    </details>
+  `;
+
+  openModal(
+    modalShell({
+      title: 'How to use Khaata',
+      subtitle: 'Four steps. Four buttons.',
+      body,
+      footer: `<button class="btn primary" data-action="close-modal">Got it</button>`,
     })
   );
 }
@@ -1110,18 +1170,18 @@ function updateTxModalFields() {
   categoryField.hidden = type === 'income';
 
   const labels = {
-    expense: 'Envelope',
-    refund: 'Back to envelope',
-    transfer: 'From envelope',
+    expense: 'Bucket',
+    refund: 'Back to bucket',
+    transfer: 'From bucket',
     income: '',
   };
   form.querySelector('[data-cat-label]').textContent = labels[type];
 
   const hints = {
-    expense: 'Spent from this envelope.',
-    refund: 'A return or cashback adds money back to this envelope.',
-    transfer: 'Money leaving your bank for an asset like a SIP or FD. It is not counted as spending.',
-    income: 'Credits land in unallocated money. Allocate them from the overview.',
+    expense: 'This money leaves the bucket.',
+    refund: 'Money returned to this bucket.',
+    transfer: 'Money moved to a SIP or FD. Not counted as spending.',
+    income: 'Money coming in. You can divide it afterwards.',
   };
   form.querySelector('[data-hint]').textContent = hints[type];
 }
@@ -1133,55 +1193,65 @@ function updateTxModalFields() {
 function openReconcileModal() {
   const derived = app.data.derived;
   const body = `<form data-form="reconcile">
-    <p class="hint">The app thinks your bank balance is <strong>${money(
+    <p class="hint">The app currently thinks you have <strong>${money(
       derived.bankBalancePaise
-    )}</strong>. Enter the real balance from your bank app.</p>
+    )}</strong>. Type what your bank app shows.</p>
     <label class="field">
-      <span>Actual bank balance</span>
+      <span>Real bank balance</span>
       <div class="money-input"><span>₹</span><input name="balance" type="number" min="0" step="0.01" value="${rupeesInput(
         derived.bankBalancePaise
       )}" inputmode="decimal" required /></div>
     </label>
     <label class="field">
       <span>Note <em>optional</em></span>
-      <input name="note" placeholder="e.g. matched after salary" maxlength="160" />
+      <input name="note" placeholder="e.g. after salary" maxlength="160" />
     </label>
     <div class="modal-actions">
       <span></span>
       <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Match balance</button></div>
     </div>
   </form>`;
-  openModal(modalShell({ title: 'Reconcile balance', subtitle: 'Differences are recorded as an adjustment.', body }));
+  openModal(
+    modalShell({
+      title: 'Check bank balance',
+      subtitle: 'The app will fix any difference.',
+      body,
+    })
+  );
 }
 
 function openAllocateModal() {
   const derived = app.data.derived;
   const surplus = categoryById(app.data.settings.surplusCategoryId);
   const body = `<form data-form="allocate">
-    <p class="confirm-copy">This fills every envelope to its monthly target, keeps rollover balances, and sweeps anything left over to <strong>${esc(
-      surplus?.name || 'unallocated'
+    <p class="confirm-copy">This puts money into your bills and spending buckets. Anything extra goes to <strong>${esc(
+      surplus?.name || 'Emergency'
     )}</strong>.</p>
     <dl class="kv">
       ${kv('Monthly plan', money(derived.plan.totalPaise))}
-      ${kv('Unallocated now', money(derived.unallocatedPaise))}
-      ${kv('Rollover balances', 'Kept where they are')}
+      ${kv('Money ready to divide', money(derived.unallocatedPaise))}
+      ${kv('Leftover in buckets', 'Stays where it is')}
     </dl>
-    <p class="hint">You can undo this allocation until you record spending or move money.</p>
+    <p class="hint">You can undo this until you record spending or move money.</p>
     <div class="modal-actions">
       <span></span>
-      <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Allocate ${monthLabel(
-        derived.period
-      )}</button></div>
+      <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Divide salary</button></div>
     </div>
   </form>`;
-  openModal(modalShell({ title: 'Run this month’s allocation', subtitle: 'One allocation per calendar month.', body }));
+  openModal(
+    modalShell({
+      title: 'Divide this month\'s salary',
+      subtitle: 'Once a month. Fills every bucket.',
+      body,
+    })
+  );
 }
 
 function openMoveModal(toId) {
   const categories = activeCategories();
   const fromCategories = categories.filter((category) => category.balancePaise > 0);
   if (fromCategories.length === 0) {
-    toast('No envelope has money to move yet.', 'error');
+    toast('No bucket has money to move yet.', 'error');
     return;
   }
 
@@ -1219,8 +1289,8 @@ function openMoveModal(toId) {
 
   const body = `<form data-form="move">
     <div class="form-grid">
-      <label class="field"><span>From</span><select name="fromCategoryId">${options(fromId)}</select></label>
-      <label class="field"><span>To</span><select name="toCategoryId">${options(toDefault)}</select></label>
+      <label class="field"><span>From bucket</span><select name="fromCategoryId">${options(fromId)}</select></label>
+      <label class="field"><span>To bucket</span><select name="toCategoryId">${options(toDefault)}</select></label>
     </div>
     <label class="field amount-field">
       <span>Amount</span>
@@ -1232,27 +1302,33 @@ function openMoveModal(toId) {
       <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Move money</button></div>
     </div>
   </form>`;
-  openModal(modalShell({ title: 'Move between envelopes', subtitle: 'The bank balance does not change.', body }));
+  openModal(
+    modalShell({
+      title: 'Move money',
+      subtitle: 'This only changes the labels. Your bank balance stays the same.',
+      body,
+    })
+  );
 }
 
 function askUndoAllocation() {
   const allocation = app.data.derived.allocation;
   if (!allocation) return;
   if (!allocation.canUndo) {
-    toast('Spending is recorded for this month. Move money between envelopes instead.', 'error');
+    toast('Spending is recorded for this month. Move money between buckets instead.', 'error');
     return;
   }
   confirmModal({
-    title: `Undo ${monthLabel(allocation.period)}?`,
+    title: `Undo ${monthLabel(allocation.period)}'s division?`,
     message:
-      'Envelope balances go back to how they were before this allocation. Spending recorded since then stays, so some envelopes may become negative. You can allocate again afterwards.',
-    confirmLabel: 'Undo allocation',
+      'Bucket balances go back to how they were before this division. Spending recorded since then stays, so some buckets may become negative. You can divide again afterwards.',
+    confirmLabel: 'Undo division',
     danger: true,
     action: async () => {
       const response = await api(`/api/allocations/${allocation.id}/undo`, { method: 'POST' });
       acceptState(response.state);
       render();
-      toast('Allocation undone.');
+      toast('Division undone.');
     },
   });
 }
@@ -1336,6 +1412,9 @@ async function handleAction(element) {
     case 'open-reconcile':
       openReconcileModal();
       return;
+    case 'open-help':
+      openHelpModal();
+      return;
     case 'open-allocate':
       openAllocateModal();
       return;
@@ -1379,7 +1458,7 @@ async function handleAction(element) {
       const transaction = app.data.transactions.find((item) => item.id === id);
       confirmModal({
         title: 'Delete transaction?',
-        message: `“${esc(transaction?.description || 'This transaction')}” will be removed and its effect on the envelope reversed.`,
+        message: `“${esc(transaction?.description || 'This transaction')}” will be removed and its effect on the bucket reversed.`,
         confirmLabel: 'Delete',
         danger: true,
         action: async () => {
@@ -1427,7 +1506,7 @@ async function handleAction(element) {
     case 'load-demo':
       confirmModal({
         title: 'Load demo data?',
-        message: 'This replaces your current envelopes, transactions and balances with sample data.',
+        message: 'This replaces your current buckets, transactions and balances with sample data.',
         confirmLabel: 'Load demo',
         danger: true,
         action: async () => {
@@ -1443,7 +1522,7 @@ async function handleAction(element) {
     case 'reset-all':
       confirmModal({
         title: 'Start over?',
-        message: 'This erases the local ledger and asks you to set up again. Download a backup first if you might want it.',
+        message: 'This erases all your data and asks you to set up again. Download a backup first if you might want it.',
         confirmLabel: 'Erase and start over',
         danger: true,
         action: async () => {
@@ -1452,7 +1531,7 @@ async function handleAction(element) {
           app.view = 'dashboard';
           history.replaceState(null, '', '#dashboard');
           render();
-          toast('Ledger reset.');
+          toast('Data reset.');
         },
       });
       return;
@@ -1504,7 +1583,7 @@ document.addEventListener('submit', async (event) => {
       const incomePaise = toPaise(data.get('income'));
       const openingBalancePaise = toPaise(data.get('balance'));
       if (incomePaise < 100) {
-        toast('Enter a monthly take-home of at least ₹1.', 'error');
+        toast('Enter a monthly salary of at least ₹1.', 'error');
         return;
       }
       if (submitButton) submitButton.textContent = 'Setting up…';
@@ -1518,21 +1597,21 @@ document.addEventListener('submit', async (event) => {
       history.replaceState(null, '', '#dashboard');
       render();
       if (response.warning) toast(response.warning, 'warn');
-      else toast('You are set up.');
+      else toast("You're ready.");
       return;
     }
 
     if (form.dataset.form === 'plan') {
       const payload = collectPlan();
       if (payload.categories.some((category) => !category.name)) {
-        toast('Give every envelope a name.', 'error');
+        toast('Give every bucket a name.', 'error');
         return;
       }
       const response = await api('/api/plan', { method: 'PUT', body: payload });
       acceptState(response.state);
       app.planDirty = false;
       render();
-      toast('Plan saved. It applies at the next allocation.');
+      toast('Plan saved. It applies next month.');
       return;
     }
 
@@ -1575,7 +1654,7 @@ document.addEventListener('submit', async (event) => {
       acceptState(response.state);
       closeModal();
       render();
-      toast(response.adjustment ? 'Balance matched. Difference recorded.' : 'Balance already matches.');
+      toast(response.adjustment ? 'Balance matched. The difference was recorded.' : 'The app already matches your bank.');
       return;
     }
 
@@ -1584,7 +1663,7 @@ document.addEventListener('submit', async (event) => {
       acceptState(response.state);
       closeModal();
       render();
-      toast(`${monthLabel(response.state.derived.period)} allocated.`);
+      toast(`${monthLabel(response.state.derived.period)} is divided.`);
       return;
     }
 
