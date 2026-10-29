@@ -1713,6 +1713,11 @@ code.token {
   margin-bottom: 0;
 }
 
+.file-btn {
+  cursor: pointer;
+  margin-top: 8px;
+}
+
 .advanced {
   margin-top: 2px;
 }

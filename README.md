@@ -44,7 +44,7 @@ The seeded plan is a template for ₹1,00,000. Edit every amount in **Plan** bef
 2. Enter the amount and save.
 3. The app immediately opens **Divide this month's salary**. Press **Divide salary**.
 
-If the month is already divided, extra money shows as **not divided**. Use **Move money** to put it into a bucket, or leave it for next month.
+If the month is already divided, extra money shows as **not divided**. Open **Move money**, choose **From: Not divided**, pick the bucket, and move it there. Or leave it for next month. Dates cannot be in the future: the app records money after it has actually moved.
 
 ## If the bank does not match
 
@@ -54,7 +54,7 @@ The big number is a record of what you logged, not a live bank feed.
 - **Bank shows more:** usually missed income or a refund. Press **Check balance** → **Record missing income**.
 - **Bank charge, interest, or a tiny rounding difference:** press **Check balance** → **Just match totals**.
 
-Matching totals only changes **Not divided**. It never changes bucket balances. If matching would make buckets short, record the expense instead or move money from another bucket.
+Matching totals only changes **Not divided**. It never changes bucket balances. If matching would make buckets short, record the expense instead or use **Move money** → **To: Not divided** to take money out of a bucket.
 
 ## Bucket types
 
@@ -150,15 +150,26 @@ Checking the bank balance is what keeps this honest: alerts can be missed, dupli
 ## Data and security
 
 - Ledger: `data/store.json`; previous version: `data/store.json.bak`.
-- **Settings → Backup** downloads a copy.
+- **Settings → Backup** downloads a copy and can **restore** one. Restoring replaces all current data.
+- If the main file is ever damaged, the app recovers from `store.json.bak` on startup and keeps the damaged copy as `store.json.corrupt`.
 - The UI has no login because it binds to `127.0.0.1` only. Do not expose this server directly to the internet. For remote access, use a VPN such as Tailscale.
 - The ingest token is the only write credential. Rotate it in Settings if it leaks.
 - Never scrape your bank's website or store bank passwords. If you later connect a real bank API, use a licensed aggregator (RBI Account Aggregator in India, Plaid/TrueLayer elsewhere) with read-only consent.
 
+## Known limits
+
+- Khaata is a **record of cash movements**, not a live bank connection. It only knows what you log or send to the ingest endpoint.
+- Investment buckets track money moved toward investing, not portfolio value. Loan buckets track money paid toward an EMI, not the outstanding loan balance.
+- It handles one bank balance. Split accounts, credit cards and cash wallets are not separate ledgers.
+- The starting balance is captured when you set up. Do not re-add transactions that happened before setup; they are already inside that balance.
+- A bucket's type is chosen when it is created. To change it, move its balance to **Not divided**, remove it, and add it under the new type.
+- Dates cannot be in the future. The app records money after it moves.
+- One division per calendar month; corrections after spending are made with **Move money**, not a re-division.
+
 ## Development
 
 ```bash
-npm test        # money-engine tests: division, leftovers, max, undo, balance checks, invariants
+npm test        # money-engine and store tests: division, types, leftovers, max, undo, balance checks, recovery
 npm run dev     # restart on server changes
 ```
 
@@ -174,6 +185,7 @@ Layout:
 
 - `GET /api/state`
 - `POST /api/setup` `{ mode: "fresh"|"demo", monthlyIncomePaise, openingBalancePaise }`
+- `POST /api/restore` — replace the ledger with an exported backup
 - `POST /api/transactions` · `PUT/DELETE /api/transactions/:id`
 - `PUT /api/plan` — full plan (`monthlyIncomePaise`, `paydayDay`, `surplusCategoryId`, `categories[]`)
 - `POST /api/allocate` · `POST /api/allocations/:id/undo`

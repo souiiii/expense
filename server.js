@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { createStore } from './lib/store.js';
 import { createState, createDemoState, fitDefaultsToIncome } from './lib/seed.js';
 import {
@@ -57,7 +58,7 @@ async function readJson(req) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 1_000_000) {
+    if (size > 5_000_000) {
       throw new AppError('BODY_TOO_LARGE', 'Request body is too large.', 413);
     }
     chunks.push(chunk);
@@ -69,6 +70,93 @@ async function readJson(req) {
   } catch {
     throw new AppError('INVALID_JSON', 'Request body must be valid JSON.', 400);
   }
+}
+
+function validateImportedState(data) {
+  if (!data || typeof data !== 'object') {
+    throw new AppError('INVALID_BACKUP', 'That is not a Khaata backup.', 400);
+  }
+  if (
+    !data.settings ||
+    !Array.isArray(data.categories) ||
+    !Array.isArray(data.transactions) ||
+    !Array.isArray(data.allocations)
+  ) {
+    throw new AppError('INVALID_BACKUP', 'That backup is missing settings, buckets, transactions or divisions.', 400);
+  }
+  const settings = data.settings;
+  if (!Number.isSafeInteger(settings.monthlyIncomePaise) || settings.monthlyIncomePaise < 1) {
+    throw new AppError('INVALID_BACKUP', 'The backup has an invalid monthly salary.', 400);
+  }
+  if (!Number.isSafeInteger(settings.openingBalancePaise) || settings.openingBalancePaise < 0) {
+    throw new AppError('INVALID_BACKUP', 'The backup has an invalid starting balance.', 400);
+  }
+
+  const categoryIds = new Set();
+  for (const category of data.categories) {
+    if (
+      !category ||
+      typeof category.id !== 'string' ||
+      typeof category.name !== 'string' ||
+      !['fixed', 'flex'].includes(category.kind) ||
+      !Number.isSafeInteger(category.balancePaise) ||
+      !Number.isSafeInteger(category.targetPaise) ||
+      category.targetPaise < 0 ||
+      typeof category.percent !== 'number' ||
+      category.percent < 0 ||
+      category.percent > 100 ||
+      (category.capPaise !== null &&
+        category.capPaise !== undefined &&
+        (!Number.isSafeInteger(category.capPaise) || category.capPaise < 0))
+    ) {
+      throw new AppError('INVALID_BACKUP', 'The backup contains an invalid bucket.', 400);
+    }
+    if (categoryIds.has(category.id)) {
+      throw new AppError('INVALID_BACKUP', 'The backup contains duplicate buckets.', 400);
+    }
+    categoryIds.add(category.id);
+  }
+  if (data.categories.length === 0) {
+    throw new AppError('INVALID_BACKUP', 'The backup has no buckets.', 400);
+  }
+
+  for (const transaction of data.transactions) {
+    if (
+      !transaction ||
+      typeof transaction.id !== 'string' ||
+      !isValidDate(transaction.date) ||
+      transaction.date > todayString() ||
+      !Number.isSafeInteger(transaction.amountPaise) ||
+      transaction.amountPaise < 1 ||
+      !['in', 'out'].includes(transaction.direction) ||
+      !['expense', 'income', 'transfer', 'adjustment'].includes(transaction.kind) ||
+      (transaction.categoryId !== null &&
+        transaction.categoryId !== undefined &&
+        typeof transaction.categoryId !== 'string')
+    ) {
+      throw new AppError('INVALID_BACKUP', 'The backup contains an invalid transaction.', 400);
+    }
+  }
+
+  for (const allocation of data.allocations) {
+    if (!allocation || typeof allocation.period !== 'string' || !Array.isArray(allocation.items)) {
+      throw new AppError('INVALID_BACKUP', 'The backup contains an invalid division.', 400);
+    }
+  }
+
+  return {
+    ...data,
+    version: data.version ?? 1,
+    moves: Array.isArray(data.moves) ? data.moves : [],
+    settings: {
+      ...settings,
+      ingestToken:
+        typeof settings.ingestToken === 'string' && settings.ingestToken
+          ? settings.ingestToken
+          : randomUUID().replace(/-/g, ''),
+      onboarded: Boolean(settings.onboarded),
+    },
+  };
 }
 
 function requirePaise(value, label, { min = 0 } = {}) {
@@ -143,7 +231,13 @@ function handleIngest(req, url, body) {
   }
 
   const description = String(body.description || body.narration || 'Bank alert').trim().slice(0, 120);
-  const date = isValidDate(body.date) ? body.date : todayString();
+  let date = todayString();
+  if (body.date !== undefined && body.date !== null && body.date !== '') {
+    if (!isValidDate(body.date)) {
+      throw new AppError('INVALID_DATE', 'date must be a real date in YYYY-MM-DD format.');
+    }
+    date = body.date;
+  }
   let kind = body.kind || (direction === 'in' ? 'income' : 'expense');
   const externalId = body.externalId ? String(body.externalId).slice(0, 120) : null;
 
@@ -178,7 +272,16 @@ function handleIngest(req, url, body) {
     categoryId = guessCategoryId(state, description, direction);
   }
   if (kind === 'transfer' && !categoryId) {
-    categoryId = state.categories.find((c) => c.id === 'invest' && !c.archived)?.id ?? null;
+    const transferCategories = state.categories.filter(
+      (category) =>
+        !category.archived &&
+        ['saving', 'investment', 'loan'].includes(categoryType(category))
+    );
+    categoryId =
+      transferCategories.find((category) => categoryType(category) === 'investment')?.id ||
+      transferCategories.find((category) => categoryType(category) === 'saving')?.id ||
+      transferCategories.find((category) => categoryType(category) === 'loan')?.id ||
+      null;
   }
 
   if (!body.kind && kind === 'expense' && categoryId) {
@@ -243,6 +346,18 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, handleSetup(body));
   }
 
+  if (req.method === 'POST' && pathname === '/api/restore') {
+    const body = await readJson(req);
+    const restored = validateImportedState(body);
+    try {
+      clientState(restored);
+    } catch {
+      throw new AppError('INVALID_BACKUP', 'That backup could not be read by the app.', 400);
+    }
+    store.set(restored);
+    return sendJson(res, 200, stateResponse());
+  }
+
   if (req.method === 'POST' && pathname === '/api/reset') {
     store.set(createState());
     return sendJson(res, 200, stateResponse());
@@ -289,9 +404,13 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && pathname === '/api/allocate') {
     const body = await readJson(req);
     const state = store.get();
-    const period = typeof body.period === 'string' && /^\d{4}-\d{2}$/.test(body.period)
-      ? body.period
-      : periodOf();
+    let period = periodOf();
+    if (body.period !== undefined) {
+      if (typeof body.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(body.period)) {
+        throw new AppError('INVALID_PERIOD', 'Period must be a real month in YYYY-MM format.');
+      }
+      period = body.period;
+    }
     const allocation = allocateMonth(state, period);
     store.save();
     return sendJson(res, 200, stateResponse({ allocation }));

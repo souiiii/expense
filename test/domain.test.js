@@ -10,6 +10,7 @@ import {
   computePlan,
   computeUnallocated,
   deleteTransaction,
+  guessCategoryId,
   moveBetweenEnvelopes,
   reconcileBalance,
   savePlan,
@@ -150,10 +151,30 @@ test('rollover envelope keeps its leftover and adds the new month target', () =>
   });
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(3000));
 
-  addIncome(state, 100000, '2026-11-01');
+  addIncome(state, 100000, '2026-10-01');
   allocateMonth(state, '2026-11');
 
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(7000));
+});
+
+test('rollover bucket covers an overspend before keeping a leftover', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  addTransaction(state, {
+    date: '2026-10-05',
+    description: 'Big clothes purchase',
+    amountPaise: P(5000),
+    direction: 'out',
+    kind: 'expense',
+    categoryId: 'clothes',
+  });
+  assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(-1000));
+
+  addIncome(state, 100000, '2026-10-01');
+  allocateMonth(state, '2026-11');
+
+  assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(4000));
 });
 
 test('rollover envelope respects its cap', () => {
@@ -167,7 +188,7 @@ test('rollover envelope respects its cap', () => {
   });
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(5000));
 
-  addIncome(state, 100000, '2026-11-01');
+  addIncome(state, 100000, '2026-10-01');
   allocateMonth(state, '2026-11');
 
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(8000));
@@ -184,7 +205,7 @@ test('non-rollover envelope resets to target and sweeps the excess', () => {
   });
   assert.equal(state.categories.find((c) => c.id === 'groceries').balancePaise, P(15000));
 
-  addIncome(state, 100000, '2026-11-01');
+  addIncome(state, 100000, '2026-10-01');
   allocateMonth(state, '2026-11');
 
   assert.equal(state.categories.find((c) => c.id === 'groceries').balancePaise, P(12000));
@@ -456,6 +477,129 @@ test('multiple investments can coexist with their own amounts', () => {
   assert.equal(
     investments.reduce((sum, category) => sum + category.targetPaise, 0),
     P(20000)
+  );
+});
+
+test('a fixed rollover bucket cannot have a Max below its monthly amount', () => {
+  const state = funded();
+  const payload = {
+    monthlyIncomePaise: P(100000),
+    paydayDay: 1,
+    surplusCategoryId: 'emergency',
+    categories: state.categories.map((category) => ({ ...category })),
+  };
+  const invest = payload.categories.find((category) => category.id === 'invest');
+  invest.capPaise = P(1000);
+
+  assert.throws(() => savePlan(state, payload), (error) => error.code === 'INVALID_CAP');
+});
+
+test('money can be moved from Not divided into a bucket and back', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+  assert.equal(computeUnallocated(state), 0);
+
+  addIncome(state, 5000, '2026-10-01');
+  assert.equal(computeUnallocated(state), P(5000));
+
+  moveBetweenEnvelopes(state, {
+    fromCategoryId: null,
+    toCategoryId: 'clothes',
+    amountPaise: P(2000),
+  });
+  assert.equal(computeUnallocated(state), P(3000));
+  assert.equal(state.categories.find((category) => category.id === 'clothes').balancePaise, P(6000));
+
+  moveBetweenEnvelopes(state, {
+    fromCategoryId: 'clothes',
+    toCategoryId: null,
+    amountPaise: P(500),
+  });
+  assert.equal(computeUnallocated(state), P(3500));
+  assert.equal(state.categories.find((category) => category.id === 'clothes').balancePaise, P(5500));
+});
+
+test('moving more than Not divided offers is rejected', () => {
+  const state = funded();
+  assert.throws(
+    () =>
+      moveBetweenEnvelopes(state, {
+        fromCategoryId: null,
+        toCategoryId: 'groceries',
+        amountPaise: P(100001),
+      }),
+    (error) => error.code === 'INSUFFICIENT_UNALLOCATED'
+  );
+});
+
+test('future-dated transactions are rejected', () => {
+  const state = funded();
+  assert.throws(
+    () =>
+      addTransaction(state, {
+        date: '2099-01-01',
+        description: 'Future salary',
+        amountPaise: P(1000),
+        direction: 'in',
+        kind: 'income',
+      }),
+    (error) => error.code === 'INVALID_DATE'
+  );
+});
+
+test('auto-categorisation falls back to a renamed investment bucket', () => {
+  const state = funded();
+  const payload = {
+    monthlyIncomePaise: P(100000),
+    paydayDay: 1,
+    surplusCategoryId: 'emergency',
+    categories: state.categories
+      .filter((category) => category.id !== 'invest')
+      .map((category) => ({ ...category }))
+      .concat([
+        {
+          kind: 'fixed',
+          type: 'investment',
+          name: 'PPF',
+          targetPaise: P(15000),
+          percent: 0,
+          rollover: true,
+          capPaise: null,
+          icon: '🏦',
+          color: '#123456',
+        },
+      ]),
+  };
+  savePlan(state, payload);
+  const ppf = state.categories.find((category) => category.name === 'PPF');
+  assert.equal(guessCategoryId(state, 'Mutual fund SIP', 'out'), ppf.id);
+});
+
+test('surplus cannot be sent to a bill or spending bucket', () => {
+  const state = funded();
+  const payload = {
+    monthlyIncomePaise: P(100000),
+    paydayDay: 1,
+    surplusCategoryId: 'groceries',
+    categories: state.categories.map((category) => ({ ...category })),
+  };
+  savePlan(state, payload);
+  assert.equal(state.settings.surplusCategoryId, 'emergency');
+});
+
+test('impossible calendar dates are rejected', () => {
+  const state = funded();
+  assert.throws(
+    () =>
+      addTransaction(state, {
+        date: '2026-02-31',
+        description: 'Impossible date',
+        amountPaise: P(100),
+        direction: 'out',
+        kind: 'expense',
+        categoryId: 'groceries',
+      }),
+    (error) => error.code === 'INVALID_DATE'
   );
 });
 

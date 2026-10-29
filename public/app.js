@@ -10,6 +10,7 @@ const app = {
 };
 
 const VIEWS = ['dashboard', 'plan', 'transactions', 'settings'];
+const UNALLOCATED_ID = '__unallocated__';
 
 const PALETTE = [
   '#b4643c',
@@ -112,6 +113,10 @@ function categoryType(category) {
   ) {
     return category.type;
   }
+  if (category.id === 'rent') return 'bill';
+  if (category.id === 'loan') return 'loan';
+  if (category.id === 'invest') return 'investment';
+  if (category.id === 'emergency') return 'saving';
   if (category.kind === 'flex') return 'spending';
   return category.rollover ? 'saving' : 'bill';
 }
@@ -199,7 +204,7 @@ function setupView() {
           <span>Money in your bank right now</span>
           <div class="money-input"><span>₹</span><input name="balance" type="number" min="0" step="100" value="" placeholder="e.g. 52000" inputmode="numeric" required /></div>
         </label>
-        <p class="hint">Use your real bank balance. If salary hasn't arrived yet, enter what's there now — you can divide it when the salary lands.</p>
+        <p class="hint">Use your real bank balance. The app starts from this balance, so only log money that moves after you start. If salary hasn't arrived yet, enter what's there now.</p>
         <button class="btn primary wide" type="submit">Start</button>
       </form>
       <div class="setup-alt">
@@ -413,8 +418,8 @@ function allocationNotice(derived) {
 
   if (unallocated < 0) {
     return `<div class="notice danger">
-      <div class="notice-copy"><strong>Your buckets are short by ${money(-unallocated)}.</strong><span>Move money from another bucket to cover it.</span></div>
-      <div class="notice-actions"><button class="btn ghost" data-action="open-move">Move money</button></div>
+      <div class="notice-copy"><strong>Your buckets are short by ${money(-unallocated)}.</strong><span>Take money out of a bucket, or record the missing expense.</span></div>
+      <div class="notice-actions"><button class="btn ghost" data-action="open-move">Fix shortage</button></div>
     </div>`;
   }
 
@@ -507,7 +512,12 @@ function planView() {
   const allocation = derived.allocation;
   const canDivide = derived.unallocatedPaise > 0;
   const settings = app.data.settings;
-  const surplusOptions = categories
+  const surplusCandidates = [
+    ...categories.filter((category) => categoryType(category) === 'saving'),
+    ...categories.filter((category) => categoryType(category) === 'investment'),
+    ...categories.filter((category) => categoryType(category) === 'loan'),
+  ];
+  const surplusOptions = (surplusCandidates.length ? surplusCandidates : categories)
     .map(
       (category) =>
         `<option value="${esc(category.id)}" ${
@@ -970,6 +980,10 @@ function settingsView() {
       <div class="panel-head"><div><h2>Backup</h2><p>Download a copy of everything.</p></div></div>
       <p class="hint">Everything is in <code>data/store.json</code>, with the previous version in <code>data/store.json.bak</code>.</p>
       <a class="btn ghost wide" href="/api/export" download>Download backup</a>
+      <label class="btn ghost wide file-btn">Restore backup
+        <input type="file" id="restore-file" accept="application/json,.json" hidden />
+      </label>
+      <p class="hint">Restoring replaces everything currently in the app.</p>
     </section>
 
     <section class="panel danger-zone">
@@ -1145,7 +1159,7 @@ function openTxModal({ id, categoryId, kind, amountPaise, description } = {}) {
     <div class="form-grid">
       <label class="field">
         <span>Date</span>
-        <input name="date" type="date" value="${transaction?.date || todayStr()}" required />
+        <input name="date" type="date" value="${transaction?.date || todayStr()}" max="${todayStr()}" required />
       </label>
       <label class="field" data-field="category">
         <span data-cat-label>Bucket</span>
@@ -1223,7 +1237,8 @@ function openHelpModal() {
 
     <div class="help-note"><strong>The app does not move your money.</strong> Your bank has one balance. The app puts labels on parts of it. Those labels are called <strong>buckets</strong>.</div>
     <p class="hint">If you set up after your salary already landed, don't add it again — it is already in your bank balance.</p>
-    <p class="hint">If extra money arrives after this month is already divided, it shows as <strong>not divided</strong>. Use <strong>Move money</strong> to put it into a bucket, or leave it for next month.</p>
+    <p class="hint">If extra money arrives after this month is already divided, it shows as <strong>not divided</strong>. Open <b>Move money</b> → <b>From: Not divided</b> → choose the bucket. Or leave it for next month.</p>
+    <p class="hint">Dates cannot be in the future. The app records money after it has actually moved.</p>
 
     <h3 class="help-title">Words you will see</h3>
     <dl class="glossary">
@@ -1480,48 +1495,79 @@ function openAllocateModal() {
 
 function openMoveModal(toId) {
   const categories = activeCategories();
-  const fromCategories = categories.filter((category) => category.balancePaise > 0);
-  if (fromCategories.length === 0) {
-    toast('No bucket has money to move yet.', 'error');
+  const unallocated = app.data.derived.unallocatedPaise;
+  const positiveCategories = categories.filter((category) => category.balancePaise > 0);
+  if (unallocated <= 0 && positiveCategories.length === 0) {
+    toast('No money is available to move.', 'error');
     return;
   }
 
   const target = toId ? categoryById(toId) : null;
-  const candidates = [...fromCategories].sort((a, b) => b.balancePaise - a.balancePaise);
-  let fromId = candidates.find((category) => category.id !== target?.id)?.id || candidates[0].id;
-  let toDefault = target?.id;
+  const largest = [...positiveCategories].sort((a, b) => b.balancePaise - a.balancePaise)[0];
+  const lowestFlex = [...categories]
+    .filter((category) => category.kind === 'flex')
+    .sort((a, b) => a.balancePaise - b.balancePaise)[0];
+
+  let fromId;
+  let toDefault;
   let defaultAmount = '';
 
-  if (!target) {
-    const deficit = categories.find((category) => category.balancePaise < 0);
-    const lowFlex = [...categories]
-      .filter((category) => category.kind === 'flex' && category.id !== fromId)
-      .sort((a, b) => a.balancePaise - b.balancePaise)[0];
-    toDefault = deficit?.id || lowFlex?.id || categories.find((category) => category.id !== fromId)?.id;
-    if (toDefault === fromId) {
-      toDefault = categories.find((category) => category.id !== fromId)?.id;
-    }
-  } else if (target.balancePaise < 0) {
-    const coverFrom = categories.find((category) => category.id === fromId);
-    defaultAmount = coverFrom
-      ? Math.min(coverFrom.balancePaise, -target.balancePaise) / 100
-      : '';
+  if (target && target.balancePaise < 0) {
+    fromId = largest?.id || UNALLOCATED_ID;
+    toDefault = target.id;
+    const available = fromId === UNALLOCATED_ID ? unallocated : categoryById(fromId)?.balancePaise || 0;
+    defaultAmount = Math.min(available, -target.balancePaise) / 100;
+  } else if (unallocated < 0) {
+    fromId = largest?.id || '';
+    toDefault = UNALLOCATED_ID;
+    defaultAmount = largest ? Math.min(largest.balancePaise, -unallocated) / 100 : '';
+  } else if (unallocated > 0) {
+    fromId = UNALLOCATED_ID;
+    const surplusCategory = categories.find(
+      (category) => category.id === app.data.settings.surplusCategoryId
+    );
+    toDefault = surplusCategory?.id || lowestFlex?.id || categories[0]?.id || '';
+    defaultAmount = unallocated / 100;
+  } else {
+    fromId = largest?.id || '';
+    const deficit = categories.find((category) => category.balancePaise < 0 && category.id !== fromId);
+    toDefault = deficit?.id || lowestFlex?.id || categories.find((category) => category.id !== fromId)?.id || '';
   }
 
-  const options = (selected) =>
-    categories
-      .map(
-        (category) =>
-          `<option value="${esc(category.id)}" ${category.id === selected ? 'selected' : ''}>${
-            category.icon
-          } ${esc(category.name)} — ${money(category.balancePaise)}</option>`
-      )
-      .join('');
+  if (fromId === toDefault) {
+    fromId = unallocated > 0 ? UNALLOCATED_ID : largest?.id || '';
+    if (fromId === toDefault) {
+      toDefault = categories.find((category) => category.id !== fromId)?.id || UNALLOCATED_ID;
+    }
+  }
+
+  const unallocatedLabel =
+    unallocated < 0
+      ? `Not divided (short by ${money(-unallocated)})`
+      : `Not divided — ${money(unallocated)}`;
+
+  const categoryOption = (category, selected) =>
+    `<option value="${esc(category.id)}" ${category.id === selected ? 'selected' : ''}>${esc(
+      category.icon
+    )} ${esc(category.name)} — ${money(category.balancePaise)}</option>`;
+
+  const fromOptions = (selected) =>
+    `${
+      unallocated > 0
+        ? `<option value="${UNALLOCATED_ID}" ${selected === UNALLOCATED_ID ? 'selected' : ''}>💤 ${unallocatedLabel}</option>`
+        : ''
+    }${positiveCategories.map((category) => categoryOption(category, selected)).join('')}`;
+
+  const toOptions = (selected) =>
+    `${categories.map((category) => categoryOption(category, selected)).join('')}<option value="${UNALLOCATED_ID}" ${
+      selected === UNALLOCATED_ID ? 'selected' : ''
+    } ${fromId === UNALLOCATED_ID ? 'disabled' : ''}>💤 ${unallocatedLabel}</option>`;
 
   const body = `<form data-form="move">
+    <p class="hint">You can move money from Not divided into a bucket, or take it out of a bucket.</p>
     <div class="form-grid">
-      <label class="field"><span>From bucket</span><select name="fromCategoryId">${options(fromId)}</select></label>
-      <label class="field"><span>To bucket</span><select name="toCategoryId">${options(toDefault)}</select></label>
+      <label class="field"><span>From</span><select name="fromCategoryId">${fromOptions(fromId)}</select></label>
+      <label class="field"><span>To</span><select name="toCategoryId">${toOptions(toDefault)}</select></label>
     </div>
     <label class="field amount-field">
       <span>Amount</span>
@@ -1894,8 +1940,12 @@ document.addEventListener('submit', async (event) => {
         !response.state.derived.allocation &&
         response.state.derived.unallocatedPaise > 0
       ) {
-        toast('Income added. Divide it to fill your buckets.');
-        openAllocateModal();
+        if (response.state.derived.unallocatedPaise >= response.state.derived.plan.totalPaise) {
+          toast('Income added. Divide it to fill your buckets.');
+          openAllocateModal();
+        } else {
+          toast('Income added. Add the rest of the salary before dividing.');
+        }
       } else if (isNewIncome && response.state.derived.unallocatedPaise > 0) {
         toast('Income added. It is not divided yet — use Move money or wait for next month.');
       } else {
@@ -1941,11 +1991,13 @@ document.addEventListener('submit', async (event) => {
 
     if (form.dataset.form === 'move') {
       const data = new FormData(form);
+      const fieldFrom = data.get('fromCategoryId');
+      const fieldTo = data.get('toCategoryId');
       const response = await api('/api/move', {
         method: 'POST',
         body: {
-          fromCategoryId: data.get('fromCategoryId'),
-          toCategoryId: data.get('toCategoryId'),
+          fromCategoryId: fieldFrom === UNALLOCATED_ID ? null : fieldFrom,
+          toCategoryId: fieldTo === UNALLOCATED_ID ? null : fieldTo,
           amountPaise: toPaise(data.get('amount')),
           note: data.get('note'),
         },
@@ -1982,13 +2034,52 @@ document.addEventListener('input', (event) => {
   }
 });
 
-document.addEventListener('change', (event) => {
+document.addEventListener('change', async (event) => {
+  if (event.target.id === 'restore-file') {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      confirmModal({
+        title: 'Restore this backup?',
+        message: 'This replaces all current buckets, transactions and balances.',
+        confirmLabel: 'Restore backup',
+        danger: true,
+        action: async () => {
+          const response = await api('/api/restore', { method: 'POST', body: data });
+          acceptState(response.state);
+          app.view = 'dashboard';
+          app.planDirty = false;
+          history.replaceState(null, '', '#dashboard');
+          render();
+          toast('Backup restored.');
+        },
+      });
+    } catch {
+      toast('That file is not a valid Khaata backup.', 'error');
+    }
+    return;
+  }
   if (event.target.name === 'tx-type') {
     updateTxModalFields();
     return;
   }
   if (event.target.name === 'categoryId' && event.target.closest('[data-form="tx"]')) {
     updateTxActionLabels();
+    return;
+  }
+  if (event.target.name === 'fromCategoryId' && event.target.closest('[data-form="move"]')) {
+    const form = event.target.closest('form');
+    const toSelect = form.querySelector('[name="toCategoryId"]');
+    const notDivided = toSelect.querySelector(`option[value="${UNALLOCATED_ID}"]`);
+    if (notDivided) notDivided.disabled = event.target.value === UNALLOCATED_ID;
+    if (event.target.value === UNALLOCATED_ID && toSelect.value === UNALLOCATED_ID) {
+      const firstCategory = [...toSelect.options].find(
+        (option) => option.value !== UNALLOCATED_ID
+      );
+      if (firstCategory) toSelect.value = firstCategory.value;
+    }
     return;
   }
   if (event.target.closest('#plan-form')) {
