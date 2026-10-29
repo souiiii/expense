@@ -374,6 +374,91 @@ test('low income scales the seeded fixed commitments', () => {
   assert.ok(fixed > 0);
 });
 
+test('categories have display types for bills, savings, investments, loans and spending', () => {
+  const state = funded();
+  const typeOf = (id) => state.categories.find((category) => category.id === id).type;
+  assert.equal(typeOf('rent'), 'bill');
+  assert.equal(typeOf('loan'), 'loan');
+  assert.equal(typeOf('invest'), 'investment');
+  assert.equal(typeOf('emergency'), 'saving');
+  assert.equal(typeOf('groceries'), 'spending');
+});
+
+test('a type only accepts the right movement', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  assert.throws(
+    () =>
+      addTransaction(state, {
+        date: '2026-10-05',
+        description: 'Trying to spend from an investment',
+        amountPaise: P(100),
+        direction: 'out',
+        kind: 'expense',
+        categoryId: 'invest',
+      }),
+    (error) => error.code === 'TYPE_MISMATCH'
+  );
+
+  assert.throws(
+    () =>
+      addTransaction(state, {
+        date: '2026-10-05',
+        description: 'Trying to transfer to groceries',
+        amountPaise: P(100),
+        direction: 'out',
+        kind: 'transfer',
+        categoryId: 'groceries',
+      }),
+    (error) => error.code === 'TYPE_MISMATCH'
+  );
+
+  const payment = addTransaction(state, {
+    date: '2026-10-05',
+    description: 'Loan payment',
+    amountPaise: P(12000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: 'loan',
+  });
+  assert.equal(payment.kind, 'transfer');
+  assert.equal(state.categories.find((category) => category.id === 'loan').balancePaise, 0);
+});
+
+test('multiple investments can coexist with their own amounts', () => {
+  const state = funded();
+  const payload = {
+    monthlyIncomePaise: P(100000),
+    paydayDay: 1,
+    surplusCategoryId: 'emergency',
+    categories: state.categories.map((category) => ({ ...category })).concat([
+      {
+        kind: 'fixed',
+        type: 'investment',
+        name: 'PPF',
+        targetPaise: P(5000),
+        percent: 0,
+        rollover: true,
+        capPaise: null,
+        icon: '🏦',
+        color: '#123456',
+      },
+    ]),
+  };
+
+  const result = savePlan(state, payload);
+  const investments = state.categories.filter(
+    (category) => !category.archived && category.type === 'investment'
+  );
+  assert.equal(investments.length, 2);
+  assert.equal(result.incomePaise, P(100000));
+  assert.equal(
+    investments.reduce((sum, category) => sum + category.targetPaise, 0),
+    P(20000)
+  );
+});
+
 test('demo state is internally consistent', () => {
   const state = createDemoState();
   const envelopes = state.categories.reduce((sum, c) => sum + c.balancePaise, 0);

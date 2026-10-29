@@ -961,9 +961,42 @@ input[type="number"] {
   text-overflow: ellipsis;
 }
 
-.env-title span {
+.env-title > span {
   font-size: 10.5px;
   color: var(--muted);
+}
+
+.env-tag {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.env-tag.bill {
+  background: #f5e9dc;
+  color: #9a5f35;
+}
+
+.env-tag.saving {
+  background: #e6eef5;
+  color: #3f6b8e;
+}
+
+.env-tag.investment {
+  background: #e4efe7;
+  color: var(--green);
+}
+
+.env-tag.loan {
+  background: #f0e9f4;
+  color: #7d6a9e;
 }
 
 .env-amount {
@@ -1303,6 +1336,12 @@ input[type="number"] {
   border: 1px solid var(--line);
   border-radius: 18px;
   overflow: hidden;
+}
+
+.plan-empty {
+  padding: 18px 16px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .plan-head,
@@ -1785,6 +1824,47 @@ code.token {
   gap: 12px;
 }
 
+.reconcile-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid #e9d4ab;
+  background: #fbf1df;
+  border-radius: 12px;
+  padding: 11px 13px;
+}
+
+.reconcile-diff strong {
+  font-size: 13px;
+}
+
+.reconcile-diff span {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.reconcile-diff.ok {
+  border-color: #cfe0d5;
+  background: #f1f7f1;
+}
+
+.reconcile-diff.ok strong {
+  color: var(--green);
+}
+
+.reconcile-warning {
+  color: var(--danger) !important;
+  font-weight: 600;
+}
+
+.reconcile-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .amount-field {
   margin-top: 2px;
 }
@@ -1916,6 +1996,28 @@ code.token {
   font-size: 12.5px;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.help-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.help-list li {
+  padding: 7px 0;
+  border-top: 1px solid #f0eadf;
+}
+
+.help-list li:first-child {
+  border-top: 0;
+}
+
+.help-list strong {
+  color: var(--ink);
 }
 
 .help-more summary {
@@ -2230,11 +2332,17 @@ code.token {
 
   .seg {
     width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-radius: 16px;
   }
 
   .seg button,
   .seg label {
-    flex: 1;
+    width: 100%;
+    border-radius: 12px;
+    padding: 8px 6px;
+    font-size: 11.5px;
   }
 
   .tx-row {

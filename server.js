@@ -9,6 +9,7 @@ import {
   AppError,
   addTransaction,
   allocateMonth,
+  categoryType,
   clientState,
   deleteTransaction,
   guessCategoryId,
@@ -143,7 +144,7 @@ function handleIngest(req, url, body) {
 
   const description = String(body.description || body.narration || 'Bank alert').trim().slice(0, 120);
   const date = isValidDate(body.date) ? body.date : todayString();
-  const kind = body.kind || (direction === 'in' ? 'income' : 'expense');
+  let kind = body.kind || (direction === 'in' ? 'income' : 'expense');
   const externalId = body.externalId ? String(body.externalId).slice(0, 120) : null;
 
   const existing = externalId
@@ -178,6 +179,13 @@ function handleIngest(req, url, body) {
   }
   if (kind === 'transfer' && !categoryId) {
     categoryId = state.categories.find((c) => c.id === 'invest' && !c.archived)?.id ?? null;
+  }
+
+  if (!body.kind && kind === 'expense' && categoryId) {
+    const category = state.categories.find((c) => c.id === categoryId);
+    if (category && ['saving', 'investment', 'loan'].includes(categoryType(category))) {
+      kind = 'transfer';
+    }
   }
 
   let targetBalancePaise = null;

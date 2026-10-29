@@ -38,12 +38,51 @@ If the balance is enough to cover the whole monthly plan, the app divides it imm
 
 The seeded plan is a template for ₹1,00,000. Edit every amount in **Plan** before trusting it: your rent, EMI and SIP are yours, not the defaults. There is also a **See an example first** button on the setup screen.
 
+## When salary arrives
+
+1. Press **Add income** on Home.
+2. Enter the amount and save.
+3. The app immediately opens **Divide this month's salary**. Press **Divide salary**.
+
+If the month is already divided, extra money shows as **not divided**. Use **Move money** to put it into a bucket, or leave it for next month.
+
+## If the bank does not match
+
+The big number is a record of what you logged, not a live bank feed.
+
+- **Bank shows less:** usually a missed expense. Press **Check balance** → **Record missing expense**, then choose the bucket.
+- **Bank shows more:** usually missed income or a refund. Press **Check balance** → **Record missing income**.
+- **Bank charge, interest, or a tiny rounding difference:** press **Check balance** → **Just match totals**.
+
+Matching totals only changes **Not divided**. It never changes bucket balances. If matching would make buckets short, record the expense instead or move money from another bucket.
+
+## Bucket types
+
+Each bucket has a type. The type decides how much it gets and which movements are allowed.
+
+| Type | Allocation | Accepts | Leftover |
+|---|---|---|---|
+| **Bill** | fixed rupee amount | Spent, Refund | Starts fresh |
+| **Saving** | fixed rupee amount | Set aside, Money back | Stays |
+| **Investment** | fixed rupee amount | Set aside, Money back | Stays, optional Max |
+| **Loan** | fixed rupee amount | Set aside, Money back | Starts fresh |
+| **Spending** | percentage of what is left | Spent, Refund | Starts fresh, or stays for clothes/electronics |
+
+**You can add as many bills, savings, investments and loans as you want.** Each one has its own name, amount, Keep setting and Max. For example: “HDFC SIP” and “PPF” are two investment buckets; “Home loan” and “Education loan” are two loan buckets.
+
+The rules are enforced:
+
+- Bills and spending buckets only accept **Spent** and **Refund**. They cannot receive savings or investment money.
+- Savings, investments and loans only accept **Set aside** and **Money back**. You cannot mark a coffee as “Spent” from an investment bucket.
+- Salary/income always goes to **Not divided**, never directly into a bucket.
+- Moving money between buckets is always allowed, because it is an explicit relabel. To spend from an investment, first **Move money** to a spending bucket, then log the spend.
+
 ## The model
 
-- **Bills & savings** (rent, loan EMI, SIP, emergency) are fixed rupee amounts, set aside first.
+- **Bills** (rent, utilities), **savings** (emergency fund), **investments** (SIP, PPF) and **loans** (EMIs) are fixed rupee amounts, set aside first.
 - **Spending buckets** (groceries, transport, clothes, electronics, fun, misc) split whatever is left by percentage.
 - **Spending percentages must add up to 100%.**
-- **Keep leftover** means that bucket keeps its balance next month. **Max** stops it growing forever. Groceries and fun start fresh instead.
+- **Keep leftover** means that bucket keeps its balance next month. **Max** stops it growing forever. Bills, loans, groceries and fun start fresh instead.
 - **One division per calendar month.** It fills each bucket from the undivided bank balance. Extra money goes to the chosen bucket (Emergency by default).
 - **Undo is available until money moves.** Once you record spending or move money between buckets, the division locks and you adjust buckets instead.
 - **The bank balance never changes when you divide or move money.** Dividing is just labelling money that is already there.
@@ -55,20 +94,24 @@ Because then buying clothes quietly shrinks your rent and EMI capacity, and no b
 
 ### What counts as what
 
-| Action | Transaction type | Effect |
+| Action | Transaction type | Bucket type |
 |---|---|---|
-| Rent, groceries, clothes | Spent | Bucket goes down, counted as spending |
-| Salary, interest | Received | Undivided money goes up |
-| SIP, FD, broker transfer | Invested | Bucket goes down, **not** counted as spending |
-| Return / cashback | Refund | Money goes back into the bucket |
-| Bank mismatch | Check bank balance | Balance fix, no bucket touched |
+| Rent, utilities | Spent | Bill |
+| Groceries, clothes, fun | Spent | Spending |
+| Salary, interest | Received | Not divided (no bucket) |
+| SIP, PPF, stocks | Set aside | Investment |
+| Emergency fund deposit | Set aside | Saving |
+| Loan EMI | Set aside | Loan |
+| Withdrawal / redemption | Money back | Saving / investment / loan |
+| Return / cashback | Refund | Spending / bill |
+| Bank mismatch | Check bank balance | Balance fix, no bucket |
 
 ## Daily use
 
-- **Log a spend:** click `+` on a bucket, or **Add expense**.
+- **Log a spend:** click `+` on a spending or bill bucket, or **Add expense**.
 - **Salary day:** add the credit as **Received**, then **Divide salary** on Home.
 - **Overspent a bucket:** **Move money** from another bucket to cover it.
-- **Paid rent / EMI / SIP:** use **Invested** for SIP/FD, **Spent** for rent/EMI.
+- **Save, invest or pay a loan:** click `+` on that bucket. The button says Save, Invest or Pay.
 - **Check against the bank:** **Check bank balance** whenever you want.
 - **Stuck?** Click **How to use** in the sidebar (or the `?` on mobile).
 

@@ -102,6 +102,20 @@ function activeCategories() {
   return app.data?.categories.filter((category) => !category.archived) ?? [];
 }
 
+function categoryType(category) {
+  if (
+    category.type === 'bill' ||
+    category.type === 'saving' ||
+    category.type === 'investment' ||
+    category.type === 'loan' ||
+    category.type === 'spending'
+  ) {
+    return category.type;
+  }
+  if (category.kind === 'flex') return 'spending';
+  return category.rollover ? 'saving' : 'bill';
+}
+
 function acceptState(state) {
   app.data = state;
   app.lastStateJson = JSON.stringify(state);
@@ -282,6 +296,7 @@ function dashboardView() {
     </div>
     <div class="hero-actions">
       <button class="btn primary light" data-action="open-tx">Add expense</button>
+      <button class="btn hero-ghost" data-action="open-tx" data-kind="income">Add income</button>
       <button class="btn hero-ghost" data-action="open-move">Move money</button>
       <button class="btn hero-ghost" data-action="open-reconcile">Check balance</button>
     </div>
@@ -291,7 +306,7 @@ function dashboardView() {
 
   <div class="stats">
     ${statCard('Spent this month', money(summary.spentPaise), `${summary.transactionCount} transaction${summary.transactionCount === 1 ? '' : 's'}`)}
-    ${statCard('Invested', money(summary.investedPaise), 'Money moved to SIPs and FDs')}
+    ${statCard('Saved & invested', money(summary.savedPaise), 'Savings and investments')}
     ${statCard(
       'Not divided',
       money(derived.unallocatedPaise),
@@ -300,7 +315,7 @@ function dashboardView() {
     )}
   </div>
 
-  ${envelopeSection('Bills & savings', 'Rent, EMI, investing and emergency. Same every month.', fixed, targets, summary)}
+  ${envelopeSection('Set aside first', 'Bills, savings, investments, loans. Not everyday spending.', fixed, targets, summary)}
   ${envelopeSection('Spending', 'These split what is left, by percentage.', flexible, targets, summary)}
 
   <section class="panel recents">
@@ -347,6 +362,14 @@ function envelopeCard(category, target, spent, moved) {
         ? 1
         : 0;
   const over = balance < 0;
+  const type = categoryType(category);
+  const tag =
+    type === 'bill' ? 'Bill' : type === 'saving' ? 'Saving' : type === 'investment' ? 'Invest' : type === 'loan' ? 'Loan' : '';
+  const action =
+    type === 'saving' ? 'Save' : type === 'investment' ? 'Invest' : type === 'loan' ? 'Pay' : 'Spend';
+  const actionKind = type === 'saving' || type === 'investment' || type === 'loan' ? 'transfer' : 'expense';
+  const movedLabel =
+    type === 'saving' ? 'saved' : type === 'investment' ? 'invested' : type === 'loan' ? 'paid' : 'moved';
   const rollMeta = category.rollover
     ? category.capPaise !== null && category.capPaise !== undefined
       ? `Leftover stays · max ${money(category.capPaise)}`
@@ -356,8 +379,10 @@ function envelopeCard(category, target, spent, moved) {
   return `<article class="env-card ${over ? 'is-over' : ''}" style="--accent:${esc(category.color)}">
     <div class="env-head">
       <span class="env-icon" style="background:${esc(category.color)}1f">${esc(category.icon)}</span>
-      <div class="env-title"><h3>${esc(category.name)}</h3><span>${rollMeta}</span></div>
-      <button class="icon-btn add" data-action="open-tx" data-category="${esc(category.id)}" data-kind="expense" title="Add expense from ${esc(category.name)}" aria-label="Add expense from ${esc(category.name)}">+</button>
+      <div class="env-title"><h3>${esc(category.name)}${
+        tag ? ` <span class="env-tag ${type}">${tag}</span>` : ''
+      }</h3><span>${rollMeta}</span></div>
+      <button class="icon-btn add" data-action="open-tx" data-category="${esc(category.id)}" data-kind="${actionKind}" title="${action} with ${esc(category.name)}" aria-label="${action} with ${esc(category.name)}">+</button>
     </div>
     <div class="env-amount">${money(balance)}</div>
     <div class="env-target">of ${target > 0 ? money(target) : 'no target'} ${
@@ -367,10 +392,12 @@ function envelopeCard(category, target, spent, moved) {
     <div class="env-foot">
       <span>${
         moved > 0
-          ? `${money(moved)} invested`
-          : spent > 0
-            ? `Spent ${money(spent)}`
-            : 'No spending yet'
+          ? `${money(moved)} ${movedLabel}`
+          : moved < 0
+            ? `${money(-moved)} came back`
+            : spent > 0
+              ? `Spent ${money(spent)}`
+              : 'No activity yet'
       }</span>
       ${
         over
@@ -456,7 +483,7 @@ function kindLabel(kind) {
     {
       expense: 'Spending',
       income: 'Money in',
-      transfer: 'Investment',
+      transfer: 'Set aside',
       adjustment: 'Balance fix',
     }[kind] || kind
   );
@@ -472,8 +499,11 @@ function planView() {
     derived.plan.items.map((item) => [item.categoryId, item.targetPaise])
   );
   const categories = activeCategories();
-  const fixed = categories.filter((category) => category.kind === 'fixed');
-  const flexible = categories.filter((category) => category.kind === 'flex');
+  const bills = categories.filter((category) => categoryType(category) === 'bill');
+  const savings = categories.filter((category) => categoryType(category) === 'saving');
+  const investments = categories.filter((category) => categoryType(category) === 'investment');
+  const loans = categories.filter((category) => categoryType(category) === 'loan');
+  const spending = categories.filter((category) => categoryType(category) === 'spending');
   const allocation = derived.allocation;
   const canDivide = derived.unallocatedPaise > 0;
   const settings = app.data.settings;
@@ -490,7 +520,7 @@ function planView() {
     <div>
       <p class="eyebrow">Your monthly plan</p>
       <h1>Monthly plan</h1>
-      <p class="lede">Set this once. Bills and savings are set aside first, then the rest is split across spending buckets by percentage.</p>
+      <p class="lede">Set this once. Bills, savings, investments and loans are set aside first, then the rest is split across spending buckets by percentage.</p>
     </div>
     <button class="btn ghost" data-action="nav" data-view="dashboard">Back to home</button>
   </div>
@@ -539,8 +569,11 @@ function planView() {
 
     <div class="plan-summary" id="plan-summary"></div>
 
-    ${planSection('fixed', 'Bills & savings', 'Rent, EMI, investing and emergency. Same every month.', fixed, targets)}
-    ${planSection('flex', 'Spending buckets', 'These split what is left, by percentage.', flexible, targets)}
+    ${planSection('fixed', 'bill', 'Bills', 'Rent and utilities. Same amount every month.', bills, targets)}
+    ${planSection('fixed', 'saving', 'Savings', 'Emergency and other savings. Leftovers stay.', savings, targets)}
+    ${planSection('fixed', 'investment', 'Investments', 'SIPs, PPF, stocks. Leftovers stay.', investments, targets)}
+    ${planSection('fixed', 'loan', 'Loans', 'EMIs. Same amount every month.', loans, targets)}
+    ${planSection('flex', 'spending', 'Spending buckets', 'Split what is left, by percentage.', spending, targets)}
 
     <p class="plan-note">Changing the plan only affects next month. It does not move this month's money.</p>
 
@@ -554,22 +587,33 @@ function planView() {
   </form>`;
 }
 
-function planSection(kind, title, subtitle, categories, targets) {
+function planSection(kind, type, title, subtitle, categories, targets) {
+  const addLabel =
+    {
+      bill: 'bill',
+      saving: 'saving',
+      investment: 'investment',
+      loan: 'loan',
+      spending: 'bucket',
+    }[type] || 'bucket';
+
   return `<section class="plan-section">
     <div class="plan-section-head">
       <div><h2>${title}</h2><span>${subtitle}</span></div>
-      <button type="button" class="link-btn" data-action="add-row" data-kind="${kind}">+ Add ${
-        kind === 'fixed' ? 'fixed amount' : 'bucket'
-      }</button>
+      <button type="button" class="link-btn" data-action="add-row" data-kind="${kind}" data-type="${type}">+ Add ${addLabel}</button>
     </div>
-    <div class="plan-table" data-kind="${kind}">
+    <div class="plan-table" data-kind="${kind}" data-type="${type}">
       <div class="plan-head">
         <span>Bucket</span><span>${kind === 'fixed' ? 'Amount' : 'Share'}</span><span>Gets</span><span>Keep</span><span>Max</span><span></span>
       </div>
       <div class="plan-rows">
-        ${categories
-          .map((category) => planRow(category, targets.get(category.id) ?? 0))
-          .join('')}
+        ${
+          categories.length === 0
+            ? `<div class="plan-empty">No ${title.toLowerCase()} yet. Use “+ Add ${addLabel}” to create one.</div>`
+            : categories
+                .map((category) => planRow(category, targets.get(category.id) ?? 0))
+                .join('')
+        }
       </div>
     </div>
   </section>`;
@@ -580,7 +624,7 @@ function planRow(category, target) {
   const color = category.color || PALETTE[0];
   return `<div class="plan-row" data-cat="${esc(category.id || '')}" data-kind="${esc(
     category.kind
-  )}" data-icon="${esc(category.icon || '🏷️')}" data-color="${esc(color)}" data-balance="${
+  )}" data-type="${esc(categoryType(category))}" data-icon="${esc(category.icon || '🏷️')}" data-color="${esc(color)}" data-balance="${
     category.balancePaise || 0
   }">
     <div class="plan-name">
@@ -665,7 +709,7 @@ function updatePlanPreview() {
         ? `Your bills are ${money(fixedTotal - income)} more than your salary.`
         : !percentOk
           ? `Your spending percentages add up to ${formatPercent(percentTotal)}%. They need to equal 100%.`
-          : `Bills & savings ${money(fixedTotal)} + spending ${money(flexTotal)} = ${money(planned)}. ${
+          : `Set aside ${money(fixedTotal)} + spending ${money(flexTotal)} = ${money(planned)}. ${
               unplanned === 0 ? 'Every rupee is planned.' : `${money(unplanned)} is not planned.`
             }`;
 
@@ -674,7 +718,7 @@ function updatePlanPreview() {
       <span style="width:${flexWidth}%;background:#23735f"></span>
     </div>
     <div class="alloc-legend">
-      <span><i style="background:#b4643c"></i>Bills & savings ${money(fixedTotal)}</span>
+      <span><i style="background:#b4643c"></i>Set aside ${money(fixedTotal)}</span>
       <span><i style="background:#23735f"></i>Spending ${money(flexTotal)}</span>
       <span><i class="unplanned"></i>Not planned ${money(Math.max(0, unplanned))}</span>
     </div>
@@ -691,24 +735,28 @@ function markPlanDirty() {
   if (bar) bar.hidden = false;
 }
 
-function addPlanRow(kind) {
+function addPlanRow(kind, type) {
   const form = $('#plan-form');
   if (!form) return;
-  const container = form.querySelector(`.plan-table[data-kind="${kind}"] .plan-rows`);
+  const container = form.querySelector(
+    `.plan-table[data-kind="${kind}"][data-type="${type}"] .plan-rows`
+  );
   if (!container) return;
   const count = $$('.plan-row', form).length;
   const category = {
     id: '',
     name: '',
     kind,
+    type,
     targetPaise: 0,
     percent: 0,
-    rollover: false,
+    rollover: type === 'saving' || type === 'investment',
     capPaise: null,
     icon: '🏷️',
     color: PALETTE[count % PALETTE.length],
     balancePaise: 0,
   };
+  container.querySelector('.plan-empty')?.remove();
   container.insertAdjacentHTML('beforeend', planRow(category, 0));
   markPlanDirty();
   updatePlanPreview();
@@ -741,6 +789,7 @@ function collectPlan() {
       return {
         id: row.dataset.cat || undefined,
         kind,
+        type: row.dataset.type,
         name: row.querySelector('[name="name"]').value.trim(),
         targetPaise: kind === 'fixed' ? toPaise(row.querySelector('[name="target"]').value) : 0,
         percent: kind === 'flex' ? Number(row.querySelector('[name="percent"]').value) || 0 : 0,
@@ -763,7 +812,7 @@ function transactionsView() {
     ['all', 'All'],
     ['expense', 'Spending'],
     ['income', 'Money in'],
-    ['transfer', 'Invested'],
+    ['transfer', 'Set aside'],
   ];
 
   return `<div class="page-head">
@@ -832,6 +881,17 @@ function applyTxFilter() {
 function settingsView() {
   const settings = app.data.settings;
   const derived = app.data.derived;
+  const targets = new Map(
+    derived.plan.items.map((item) => [item.categoryId, item.targetPaise])
+  );
+  const totalFor = (type) =>
+    activeCategories()
+      .filter((category) => categoryType(category) === type)
+      .reduce((sum, category) => sum + (targets.get(category.id) ?? 0), 0);
+  const billsTotal = totalFor('bill');
+  const savingsTotal = totalFor('saving');
+  const investmentsTotal = totalFor('investment');
+  const loansTotal = totalFor('loan');
   const endpoint = `${location.origin}/api/ingest`;
   const token = settings.ingestToken;
   const curl = `curl -s -X POST ${endpoint} \\
@@ -854,7 +914,10 @@ function settingsView() {
       <dl class="kv">
         ${kv('Salary', money(settings.monthlyIncomePaise))}
         ${kv('Salary date', `Day ${settings.paydayDay}`)}
-        ${kv('Bills & savings', money(derived.plan.fixedTotalPaise))}
+        ${kv('Bills', money(billsTotal))}
+        ${kv('Savings', money(savingsTotal))}
+        ${kv('Investments', money(investmentsTotal))}
+        ${kv('Loans', money(loansTotal))}
         ${kv('Spending money', money(derived.plan.flexPoolPaise))}
         ${kv('Extra goes to', esc(categoryById(settings.surplusCategoryId)?.name || 'Not set'))}
       </dl>
@@ -996,7 +1059,31 @@ function defaultCategoryId(categories) {
   );
 }
 
-function openTxModal({ id, categoryId, kind } = {}) {
+function allowedCategoriesForType(type, categories) {
+  if (type === 'expense' || type === 'refund') {
+    return categories.filter((category) => ['spending', 'bill'].includes(categoryType(category)));
+  }
+  if (type === 'transfer' || type === 'withdraw') {
+    return categories.filter((category) =>
+      ['saving', 'investment', 'loan'].includes(categoryType(category))
+    );
+  }
+  return categories;
+}
+
+function defaultCategoryIdForType(type, categories) {
+  const findType = (wanted) =>
+    categories.find((category) => categoryType(category) === wanted)?.id;
+  if (type === 'transfer') {
+    return findType('investment') || findType('saving') || findType('loan') || categories[0]?.id || '';
+  }
+  if (type === 'withdraw') {
+    return findType('saving') || findType('investment') || findType('loan') || categories[0]?.id || '';
+  }
+  return defaultCategoryId(categories);
+}
+
+function openTxModal({ id, categoryId, kind, amountPaise, description } = {}) {
   const transaction = id ? app.data.transactions.find((item) => item.id === id) : null;
   if (transaction?.kind === 'adjustment') {
     openAdjustmentModal(transaction);
@@ -1009,12 +1096,14 @@ function openTxModal({ id, categoryId, kind } = {}) {
       categories.push(existingCategory);
     }
   }
-  const selectedCategory = transaction?.categoryId || categoryId || defaultCategoryId(categories);
+
   const initialType = transaction
     ? transaction.kind === 'income'
       ? 'income'
       : transaction.kind === 'transfer'
-        ? 'transfer'
+        ? transaction.direction === 'in'
+          ? 'withdraw'
+          : 'transfer'
         : transaction.direction === 'in'
           ? 'refund'
           : 'expense'
@@ -1024,25 +1113,32 @@ function openTxModal({ id, categoryId, kind } = {}) {
         ? 'transfer'
         : 'expense';
 
+  const allowed = allowedCategoriesForType(initialType, categories);
+  const desiredCategory = transaction?.categoryId || categoryId;
+  const selectedCategory = allowed.some((category) => category.id === desiredCategory)
+    ? desiredCategory
+    : defaultCategoryIdForType(initialType, allowed);
+
   const body = `<form data-form="tx" data-id="${esc(transaction?.id || '')}">
     <div class="seg" role="radiogroup" aria-label="Type">
       ${typeOption('expense', 'Spent', initialType)}
       ${typeOption('income', 'Received', initialType)}
-      ${typeOption('transfer', 'Invested', initialType)}
+      ${typeOption('transfer', 'Set aside', initialType)}
       ${typeOption('refund', 'Refund', initialType)}
+      ${typeOption('withdraw', 'Money back', initialType)}
     </div>
 
     <label class="field amount-field">
       <span>Amount</span>
       <div class="money-input big"><span>₹</span><input name="amount" type="number" min="0.01" step="0.01" value="${
-        transaction ? transaction.amountPaise / 100 : ''
+        transaction ? transaction.amountPaise / 100 : amountPaise ? amountPaise / 100 : ''
       }" placeholder="0" inputmode="decimal" required /></div>
     </label>
 
     <label class="field">
       <span>Description</span>
       <input name="description" value="${esc(
-        transaction?.description || ''
+        transaction?.description || description || ''
       )}" placeholder="Swiggy, rent, salary…" maxlength="120" required />
     </label>
 
@@ -1053,7 +1149,7 @@ function openTxModal({ id, categoryId, kind } = {}) {
       </label>
       <label class="field" data-field="category">
         <span data-cat-label>Bucket</span>
-        <select name="categoryId">${categoryOptions(categories, selectedCategory)}</select>
+        <select name="categoryId">${categoryOptions(allowed, selectedCategory)}</select>
       </label>
     </div>
 
@@ -1074,7 +1170,7 @@ function openTxModal({ id, categoryId, kind } = {}) {
       }
       <div>
         <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
-        <button type="submit" class="btn primary">${transaction ? 'Save changes' : 'Add transaction'}</button>
+        <button type="submit" class="btn primary" data-submit-button>${transaction ? 'Save changes' : 'Add transaction'}</button>
       </div>
     </div>
   </form>`;
@@ -1119,26 +1215,47 @@ function openAdjustmentModal(transaction) {
 function openHelpModal() {
   const body = `
     <div class="help-steps">
-      <div class="help-step"><span>1</span><div><strong>Salary day</strong><p>Press <b>Add income</b>, enter the salary, then press <b>Divide salary</b>. Do this once a month, after the full salary is in.</p></div></div>
+      <div class="help-step"><span>1</span><div><strong>Salary day</strong><p>Press <b>Add income</b>, enter the salary, and save. The app immediately asks you to <b>Divide salary</b> — press it. Do this once a month, after the full salary is in.</p></div></div>
       <div class="help-step"><span>2</span><div><strong>When you spend</strong><p>Press <b>Add expense</b>, enter the amount, and choose a bucket. The app subtracts it from that bucket.</p></div></div>
-      <div class="help-step"><span>3</span><div><strong>If the big number looks wrong</strong><p>Press <b>Check bank balance</b> and type what your bank app shows. The app fixes the difference.</p></div></div>
+      <div class="help-step"><span>3</span><div><strong>If the big number looks wrong</strong><p>Press <b>Check balance</b> and type what your bank app shows. The app fixes the difference.</p></div></div>
       <div class="help-step"><span>4</span><div><strong>Next month</strong><p>Add the new salary and divide it again. Clothes and electronics keep their leftovers; groceries and fun start fresh.</p></div></div>
     </div>
 
     <div class="help-note"><strong>The app does not move your money.</strong> Your bank has one balance. The app puts labels on parts of it. Those labels are called <strong>buckets</strong>.</div>
     <p class="hint">If you set up after your salary already landed, don't add it again — it is already in your bank balance.</p>
+    <p class="hint">If extra money arrives after this month is already divided, it shows as <strong>not divided</strong>. Use <strong>Move money</strong> to put it into a bucket, or leave it for next month.</p>
 
     <h3 class="help-title">Words you will see</h3>
     <dl class="glossary">
       <div><dt>Bucket</dt><dd>A labelled part of your money, like Rent, Food, or Clothes.</dd></div>
-      <div><dt>Bills & savings</dt><dd>Rent, EMI, investing and emergency. Same amount every month.</dd></div>
+      <div><dt>Bills</dt><dd>Rent and utilities. The same amount every month.</dd></div>
+      <div><dt>Savings</dt><dd>Emergency fund. The same amount every month; leftovers stay.</dd></div>
+      <div><dt>Investments</dt><dd>SIPs, PPF, stocks. The same amount every month; leftovers stay.</dd></div>
+      <div><dt>Loans</dt><dd>EMIs. The same amount every month.</dd></div>
       <div><dt>Spending</dt><dd>The rest, split by percentage across everyday buckets.</dd></div>
+      <div><dt>Set aside</dt><dd>Move money into a savings, investment or loan bucket. Not spending.</dd></div>
+      <div><dt>Money back</dt><dd>Money returned from a savings, investment or loan bucket.</dd></div>
       <div><dt>Divide salary</dt><dd>Press once on payday to fill all the buckets.</dd></div>
       <div><dt>Not divided</dt><dd>Money in your bank that is not in a bucket yet.</dd></div>
       <div><dt>Keep leftover</dt><dd>That bucket's leftover stays for next month. Otherwise it starts fresh.</dd></div>
       <div><dt>Max</dt><dd>The most a bucket can build up before extra money goes to Emergency.</dd></div>
-      <div><dt>Extra</dt><dd>Money left after every bucket is full. It goes to Emergency by default.</dd></div>
     </dl>
+
+    <h3 class="help-title">How buckets behave</h3>
+    <ul class="help-list">
+      <li><strong>Bills — Rent, utilities.</strong> Refill every month, get used up, then start fresh.</li>
+      <li><strong>Savings — Emergency fund.</strong> Refill every month and keep their leftover.</li>
+      <li><strong>Investments — SIP, PPF, stocks.</strong> Refill every month and keep their leftover.</li>
+      <li><strong>Loans — EMIs.</strong> Refill every month. Use “Set aside” to pay the lender.</li>
+      <li><strong>Spending — Groceries, transport, fun.</strong> Refill every month, then start fresh.</li>
+      <li><strong>Saving-up spending — Clothes, electronics.</strong> Refill, and keep leftover up to Max.</li>
+    </ul>
+    <p class="hint">Each type only accepts the right movement. Bills and spending accept <b>Spent</b> and <b>Refund</b>. Savings, investments and loans accept <b>Set aside</b> and <b>Money back</b>. You cannot spend directly from an investment bucket — move money to a spending bucket first.</p>
+    <p class="hint">You can add as many bills, savings, investments and loans as you want. Each gets its own amount, Keep and Max setting.</p>
+
+    <h3 class="help-title">If the bank does not match</h3>
+    <p class="hint">The app only knows what you have logged. If your bank shows less, you probably spent something and forgot to log it. Use <b>Check balance</b> → <b>Record missing expense</b>. If the bank shows more, record missing income. For a bank charge or interest, use <b>Just match totals</b>.</p>
+    <p class="hint">Matching totals only changes <b>Not divided</b>. It never changes your buckets. If it would make your buckets short, record the expense instead or move money from another bucket.</p>
 
     <details class="help-more">
       <summary>What happens to leftover money?</summary>
@@ -1169,21 +1286,91 @@ function updateTxModalFields() {
   const categoryField = form.querySelector('[data-field="category"]');
   categoryField.hidden = type === 'income';
 
-  const labels = {
-    expense: 'Bucket',
-    refund: 'Back to bucket',
-    transfer: 'From bucket',
-    income: '',
-  };
-  form.querySelector('[data-cat-label]').textContent = labels[type];
+  if (type !== 'income') {
+    const all = activeCategories();
+    const select = form.querySelector('[name="categoryId"]');
+    const currentId = select.value;
+    const currentCategory = categoryById(currentId);
+    if (currentCategory && !all.some((category) => category.id === currentCategory.id)) {
+      all.push(currentCategory);
+    }
+    const allowed = allowedCategoriesForType(type, all);
+    const nextId = allowed.some((category) => category.id === currentId)
+      ? currentId
+      : defaultCategoryIdForType(type, allowed);
+    select.innerHTML = categoryOptions(allowed, nextId);
+    select.disabled = allowed.length === 0;
+  }
 
-  const hints = {
-    expense: 'This money leaves the bucket.',
-    refund: 'Money returned to this bucket.',
-    transfer: 'Money moved to a SIP or FD. Not counted as spending.',
-    income: 'Money coming in. You can divide it afterwards.',
-  };
-  form.querySelector('[data-hint]').textContent = hints[type];
+  updateTxActionLabels();
+}
+
+function updateTxActionLabels() {
+  const form = $('[data-form="tx"]');
+  if (!form) return;
+  const selected = form.querySelector('[name="tx-type"]:checked');
+  if (!selected) return;
+  const type = selected.value;
+  const select = form.querySelector('[name="categoryId"]');
+  const category = select ? categoryById(select.value) : null;
+  const subtype = category ? categoryType(category) : '';
+
+  let catLabel = 'Bucket';
+  let hint = '';
+  let action = 'Add transaction';
+
+  if (type === 'expense') {
+    catLabel = 'Bucket';
+    hint = 'This money leaves the bucket.';
+    action = 'Add expense';
+  } else if (type === 'refund') {
+    catLabel = 'Back to bucket';
+    hint = 'Money returned to this bucket.';
+    action = 'Add refund';
+  } else if (type === 'income') {
+    catLabel = '';
+    hint = 'Money coming in. After saving, the app will offer to divide it.';
+    action = 'Add income';
+  } else if (type === 'transfer') {
+    catLabel = 'From bucket';
+    if (subtype === 'saving') {
+      hint = 'Money saved into this bucket. Not counted as spending.';
+      action = 'Add saving';
+    } else if (subtype === 'investment') {
+      hint = 'Money invested from this bucket. Not counted as spending.';
+      action = 'Add investment';
+    } else if (subtype === 'loan') {
+      hint = 'Loan payment from this bucket. Not counted as spending.';
+      action = 'Pay loan';
+    }
+  } else if (type === 'withdraw') {
+    catLabel = 'To bucket';
+    action = 'Add money back';
+    if (subtype === 'saving') {
+      hint = 'Money taken back from savings.';
+    } else if (subtype === 'investment') {
+      hint = 'Money returned from an investment.';
+    } else if (subtype === 'loan') {
+      hint = 'Money returned from a loan.';
+    }
+  }
+
+  const emptyOptions = type !== 'income' && select ? select.options.length === 0 : false;
+  if (emptyOptions) {
+    hint =
+      type === 'expense' || type === 'refund'
+        ? 'Add a spending or bill bucket in Plan first.'
+        : 'Add a savings, investment or loan bucket in Plan first.';
+  }
+
+  form.querySelector('[data-cat-label]').textContent = catLabel;
+  form.querySelector('[data-hint]').textContent = hint;
+
+  const submit = form.querySelector('[data-submit-button]');
+  if (submit) {
+    submit.textContent = form.dataset.id ? 'Save changes' : action;
+    submit.disabled = emptyOptions;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1192,39 +1379,83 @@ function updateTxModalFields() {
 
 function openReconcileModal() {
   const derived = app.data.derived;
-  const body = `<form data-form="reconcile">
-    <p class="hint">The app currently thinks you have <strong>${money(
-      derived.bankBalancePaise
-    )}</strong>. Type what your bank app shows.</p>
+  const body = `<form data-form="reconcile" data-app-balance="${derived.bankBalancePaise}">
+    <p class="hint">The app only knows the transactions you have logged. It is not a live bank connection.</p>
     <label class="field">
-      <span>Real bank balance</span>
+      <span>What does your bank app show?</span>
       <div class="money-input"><span>₹</span><input name="balance" type="number" min="0" step="0.01" value="${rupeesInput(
         derived.bankBalancePaise
       )}" inputmode="decimal" required /></div>
     </label>
+    <div class="reconcile-diff" id="reconcile-diff"></div>
     <label class="field">
       <span>Note <em>optional</em></span>
-      <input name="note" placeholder="e.g. after salary" maxlength="160" />
+      <input name="note" placeholder="e.g. bank charge" maxlength="160" />
     </label>
     <div class="modal-actions">
-      <span></span>
-      <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Match balance</button></div>
+      <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
+      <div class="reconcile-buttons">
+        <button type="submit" class="btn ghost" id="reconcile-match">Just match totals</button>
+        <button type="button" class="btn primary" data-action="reconcile-classify" id="reconcile-classify">Record missing expense</button>
+      </div>
     </div>
   </form>`;
   openModal(
     modalShell({
       title: 'Check bank balance',
-      subtitle: 'The app will fix any difference.',
+      subtitle: 'Find out why the numbers differ.',
       body,
     })
   );
+  updateReconcilePreview();
+}
+
+function updateReconcilePreview() {
+  const form = $('[data-form="reconcile"]');
+  if (!form) return;
+  const appBalance = Number(form.dataset.appBalance);
+  const actual = toPaise(form.elements.balance.value);
+  const diff = actual - appBalance;
+  const status = $('#reconcile-diff');
+  const classify = $('#reconcile-classify');
+  const match = $('#reconcile-match');
+  if (!status || !classify || !match) return;
+
+  if (diff === 0) {
+    status.className = 'reconcile-diff ok';
+    status.innerHTML = `<strong>They already match.</strong><span>Nothing to fix.</span>`;
+    classify.disabled = true;
+    match.disabled = true;
+    return;
+  }
+
+  classify.disabled = false;
+  match.disabled = false;
+
+  if (diff < 0) {
+    const finalUnallocated = app.data.derived.unallocatedPaise + diff;
+    const shortfall = finalUnallocated < 0 ? -finalUnallocated : 0;
+    status.className = 'reconcile-diff warn';
+    status.innerHTML = `<strong>Your bank is ${money(-diff)} lower than the app.</strong><span>Usually a missed expense or a bank charge. Record it as spending so the right bucket pays for it.</span>${
+      shortfall > 0
+        ? `<span class="reconcile-warning">Matching the totals instead will make your buckets short by ${money(
+            shortfall
+          )}.</span>`
+        : ''
+    }`;
+    classify.textContent = 'Record missing expense';
+  } else {
+    status.className = 'reconcile-diff warn';
+    status.innerHTML = `<strong>Your bank is ${money(diff)} more than the app.</strong><span>Usually missed income or a refund. Record it, or just match the totals.</span>`;
+    classify.textContent = 'Record missing income';
+  }
 }
 
 function openAllocateModal() {
   const derived = app.data.derived;
   const surplus = categoryById(app.data.settings.surplusCategoryId);
   const body = `<form data-form="allocate">
-    <p class="confirm-copy">This puts money into your bills and spending buckets. Anything extra goes to <strong>${esc(
+    <p class="confirm-copy">This puts money into your bills, savings and spending buckets. Anything extra goes to <strong>${esc(
       surplus?.name || 'Emergency'
     )}</strong>.</p>
     <dl class="kv">
@@ -1412,6 +1643,21 @@ async function handleAction(element) {
     case 'open-reconcile':
       openReconcileModal();
       return;
+    case 'reconcile-classify': {
+      const form = $('[data-form="reconcile"]');
+      if (!form) return;
+      const appBalance = Number(form.dataset.appBalance);
+      const actual = toPaise(form.elements.balance.value);
+      const diff = actual - appBalance;
+      if (diff === 0) return;
+      closeModal();
+      openTxModal({
+        kind: diff > 0 ? 'income' : 'expense',
+        amountPaise: Math.abs(diff),
+        description: diff > 0 ? 'Missed income' : 'Missed expense',
+      });
+      return;
+    }
     case 'open-help':
       openHelpModal();
       return;
@@ -1428,7 +1674,7 @@ async function handleAction(element) {
       askUndoAllocation();
       return;
     case 'add-row':
-      addPlanRow(element.dataset.kind);
+      addPlanRow(element.dataset.kind, element.dataset.type);
       return;
     case 'remove-row':
       removePlanRow(element);
@@ -1623,6 +1869,7 @@ document.addEventListener('submit', async (event) => {
         income: { kind: 'income', direction: 'in' },
         transfer: { kind: 'transfer', direction: 'out' },
         refund: { kind: 'expense', direction: 'in' },
+        withdraw: { kind: 'transfer', direction: 'in' },
       };
       const body = {
         date: data.get('date'),
@@ -1634,6 +1881,7 @@ document.addEventListener('submit', async (event) => {
         notes: data.get('notes'),
       };
       const id = form.dataset.id;
+      const isNewIncome = !id && body.kind === 'income' && body.direction === 'in';
       const response = await api(id ? `/api/transactions/${id}` : '/api/transactions', {
         method: id ? 'PUT' : 'POST',
         body,
@@ -1641,7 +1889,18 @@ document.addEventListener('submit', async (event) => {
       acceptState(response.state);
       closeModal();
       render();
-      toast(id ? 'Transaction updated.' : 'Transaction added.');
+      if (
+        isNewIncome &&
+        !response.state.derived.allocation &&
+        response.state.derived.unallocatedPaise > 0
+      ) {
+        toast('Income added. Divide it to fill your buckets.');
+        openAllocateModal();
+      } else if (isNewIncome && response.state.derived.unallocatedPaise > 0) {
+        toast('Income added. It is not divided yet — use Move money or wait for next month.');
+      } else {
+        toast(id ? 'Transaction updated.' : 'Transaction added.');
+      }
       return;
     }
 
@@ -1654,7 +1913,20 @@ document.addEventListener('submit', async (event) => {
       acceptState(response.state);
       closeModal();
       render();
-      toast(response.adjustment ? 'Balance matched. The difference was recorded.' : 'The app already matches your bank.');
+      if (!response.adjustment) {
+        toast('The app already matches your bank.');
+      } else if (response.state.derived.unallocatedPaise < 0) {
+        toast(
+          `Balance matched. Your buckets are short by ${money(
+            -response.state.derived.unallocatedPaise
+          )} — move money to cover it.`,
+          'warn'
+        );
+      } else if (response.adjustment.direction === 'out') {
+        toast('Balance matched. The difference came out of Not divided.');
+      } else {
+        toast('Balance matched. The difference is now in Not divided.');
+      }
       return;
     }
 
@@ -1695,6 +1967,10 @@ document.addEventListener('submit', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
+  if (event.target.closest('[data-form="reconcile"]')) {
+    updateReconcilePreview();
+    return;
+  }
   if (event.target.closest('#plan-form')) {
     markPlanDirty();
     updatePlanPreview();
@@ -1709,6 +1985,10 @@ document.addEventListener('input', (event) => {
 document.addEventListener('change', (event) => {
   if (event.target.name === 'tx-type') {
     updateTxModalFields();
+    return;
+  }
+  if (event.target.name === 'categoryId' && event.target.closest('[data-form="tx"]')) {
+    updateTxActionLabels();
     return;
   }
   if (event.target.closest('#plan-form')) {
