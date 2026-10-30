@@ -1014,6 +1014,49 @@ input[type="number"] {
   margin-bottom: 11px;
 }
 
+.env-commit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: -4px 0 9px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.env-commit.done {
+  color: var(--green);
+}
+
+.env-commit.partial {
+  color: var(--warm);
+}
+
+.env-commit.due {
+  color: var(--warm);
+}
+
+.env-commit.refunded {
+  color: var(--danger);
+}
+
+.env-commit.muted {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.env-card.is-done {
+  border-color: #cfe0d5;
+}
+
+.done-warning {
+  background: #fbf1df;
+  border: 1px solid #e9d4ab;
+  border-radius: 10px;
+  padding: 9px 11px;
+  color: #7c541d;
+}
+
 .bar {
   height: 5px;
   border-radius: 99px;

@@ -77,6 +77,27 @@ The rules are enforced:
 - Salary/income always goes to **Not divided**, never directly into a bucket.
 - Moving money between buckets is always allowed, because it is an explicit relabel. To spend from an investment, first **Move money** to a spending bucket, then log the spend.
 
+## Monthly ticks
+
+Fixed buckets show a green tick when the month's plan for that bucket is covered:
+
+| Type | Tick when |
+|---|---|
+| **Bill** | This month's `Spent` (minus refunds) reaches the target |
+| **Saving** | The monthly amount is funded by **Divide salary**. Savings kept in the bank count as saved |
+| **Investment** | This month's `Set aside` (minus money back) reaches the target |
+| **Loan** | This month's `Set aside` loan payment reaches the target |
+| **Spending** | No tick; it is ongoing |
+
+The tick is derived from this month's activity and the monthly division target — not from the bucket balance. That means:
+
+- A savings bucket with last year's money does **not** tick just because its balance is high.
+- A bill bucket at zero does **not** tick just because its balance is zero.
+- A refund, bounced EMI, edited amount or deleted payment updates the tick automatically.
+- The transaction date decides which month a payment counts in. A payment dated last month does not tick this month.
+- Extra payments are allowed. The app shows a warning, but never blocks them.
+- A bucket added after the month's division shows **“Added after this month's division”** and starts ticking next month.
+
 ## The model
 
 - **Bills** (rent, utilities), **savings** (emergency fund), **investments** (SIP, PPF) and **loans** (EMIs) are fixed rupee amounts, set aside first.

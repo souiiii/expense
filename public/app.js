@@ -279,10 +279,30 @@ function dashboardView() {
   const targets = new Map(
     derived.plan.items.map((item) => [item.categoryId, item.targetPaise])
   );
+  const displayTargets = new Map(targets);
+  if (derived.allocation) {
+    for (const item of derived.allocation.items) {
+      if (item.reason === 'target') displayTargets.set(item.categoryId, item.targetPaise);
+    }
+  }
   const categories = activeCategories();
   const fixed = categories.filter((category) => category.kind === 'fixed');
   const flexible = categories.filter((category) => category.kind === 'flex');
   const summary = derived.summary;
+  const commitments = new Map(
+    (derived.commitments || []).map((commitment) => [commitment.categoryId, commitment])
+  );
+  const countable = (derived.commitments || []).filter(
+    (commitment) =>
+      commitment.targetPaise > 0 &&
+      commitment.status !== 'not-in-division' &&
+      (!derived.allocation || commitment.inDivision)
+  );
+  const doneCount = countable.filter((commitment) => commitment.status === 'done').length;
+  const fixedSubtitle =
+    countable.length > 0
+      ? `Bills, savings, investments, loans · ${doneCount} of ${countable.length} done this month.`
+      : 'Bills, savings, investments, loans. Not everyday spending.';
 
   const notice = allocationNotice(derived);
 
@@ -311,7 +331,7 @@ function dashboardView() {
 
   <div class="stats">
     ${statCard('Spent this month', money(summary.spentPaise), `${summary.transactionCount} transaction${summary.transactionCount === 1 ? '' : 's'}`)}
-    ${statCard('Saved & invested', money(summary.savedPaise), 'Savings and investments')}
+    ${statCard('Moved out', money(summary.investedPaise), 'Savings, investments, loans')}
     ${statCard(
       'Not divided',
       money(derived.unallocatedPaise),
@@ -320,8 +340,8 @@ function dashboardView() {
     )}
   </div>
 
-  ${envelopeSection('Set aside first', 'Bills, savings, investments, loans. Not everyday spending.', fixed, targets, summary)}
-  ${envelopeSection('Spending', 'These split what is left, by percentage.', flexible, targets, summary)}
+  ${envelopeSection('Set aside first', fixedSubtitle, fixed, targets, summary, commitments)}
+  ${envelopeSection('Spending', 'These split what is left, by percentage.', flexible, displayTargets, summary, null)}
 
   <section class="panel recents">
     <div class="panel-head">
@@ -336,7 +356,7 @@ function statCard(label, value, sub, tone = '') {
   return `<div class="stat ${tone}"><span>${label}</span><strong>${value}</strong><small>${sub}</small></div>`;
 }
 
-function envelopeSection(title, subtitle, categories, targets, summary) {
+function envelopeSection(title, subtitle, categories, targets, summary, commitments) {
   if (categories.length === 0) return '';
   return `<section class="section">
     <div class="section-head">
@@ -345,20 +365,56 @@ function envelopeSection(title, subtitle, categories, targets, summary) {
     </div>
     <div class="env-grid">
       ${categories
-        .map((category) =>
-          envelopeCard(
+        .map((category) => {
+          const commitment = commitments?.get(category.id) ?? null;
+          return envelopeCard(
             category,
-            targets.get(category.id) ?? 0,
+            commitment ? commitment.targetPaise : targets.get(category.id) ?? 0,
             summary.spentByCategory[category.id] ?? 0,
-            summary.transferredByCategory?.[category.id] ?? 0
-          )
-        )
+            summary.transferredByCategory?.[category.id] ?? 0,
+            commitment
+          );
+        })
         .join('')}
     </div>
   </section>`;
 }
 
-function envelopeCard(category, target, spent, moved) {
+function commitmentStatusHtml(commitment) {
+  if (!commitment) return '';
+  const type = commitment.type;
+  const verb = type === 'saving' ? 'saved' : type === 'investment' ? 'invested' : 'paid';
+  const dueVerb = type === 'saving' ? 'to save' : type === 'investment' ? 'to invest' : 'due';
+
+  if (commitment.status === 'done') {
+    const label = type === 'saving' ? 'Saved' : type === 'investment' ? 'Invested' : 'Paid';
+    return `<div class="env-commit done">✓ ${label} this month${
+      commitment.afterDivision ? ' · added after division' : ''
+    }${commitment.extraPaise > 0 ? ` · ${money(commitment.extraPaise)} extra` : ''}</div>`;
+  }
+  if (commitment.status === 'partial') {
+    return `<div class="env-commit partial">${money(commitment.paidPaise)} of ${money(
+      commitment.targetPaise
+    )} ${verb}</div>`;
+  }
+  if (commitment.status === 'due') {
+    return `<div class="env-commit due">${money(commitment.targetPaise)} ${dueVerb}</div>`;
+  }
+  if (commitment.status === 'refunded') {
+    return `<div class="env-commit refunded">Refunded — not done</div>`;
+  }
+  if (commitment.status === 'not-in-division') {
+    return `<div class="env-commit muted">Added after this month's division${
+      commitment.paidPaise > 0 ? ` · ${money(commitment.paidPaise)} moved` : ''
+    }</div>`;
+  }
+  if (commitment.status === 'no-target') {
+    return `<div class="env-commit muted">No amount set</div>`;
+  }
+  return '';
+}
+
+function envelopeCard(category, target, spent, moved, commitment) {
   const balance = category.balancePaise;
   const ratio =
     target > 0
@@ -374,25 +430,47 @@ function envelopeCard(category, target, spent, moved) {
     type === 'saving' ? 'Save' : type === 'investment' ? 'Invest' : type === 'loan' ? 'Pay' : 'Spend';
   const actionKind = type === 'saving' || type === 'investment' || type === 'loan' ? 'transfer' : 'expense';
   const movedLabel =
-    type === 'saving' ? 'saved' : type === 'investment' ? 'invested' : type === 'loan' ? 'paid' : 'moved';
+    type === 'saving' ? 'moved out' : type === 'investment' ? 'invested' : type === 'loan' ? 'paid' : 'moved';
+  const idleLabel =
+    type === 'bill'
+      ? 'No payment yet'
+      : type === 'loan'
+        ? 'Nothing paid yet'
+        : type === 'investment'
+          ? 'Nothing invested yet'
+          : type === 'saving'
+            ? 'Still in the bucket'
+            : 'No spending yet';
+  const done = commitment?.status === 'done';
+  const actionTitle = done
+    ? type === 'bill'
+      ? 'Add another payment'
+      : type === 'saving'
+        ? 'Add another transfer'
+        : type === 'investment'
+          ? 'Add another investment'
+          : 'Add another loan payment'
+    : `${action} with ${category.name}`;
+  const statusHtml = commitmentStatusHtml(commitment);
   const rollMeta = category.rollover
     ? category.capPaise !== null && category.capPaise !== undefined
       ? `Leftover stays · max ${money(category.capPaise)}`
       : 'Leftover stays'
     : 'Resets next month';
 
-  return `<article class="env-card ${over ? 'is-over' : ''}" style="--accent:${esc(category.color)}">
+  return `<article class="env-card ${over ? 'is-over' : ''} ${done ? 'is-done' : ''}" style="--accent:${esc(category.color)}">
     <div class="env-head">
       <span class="env-icon" style="background:${esc(category.color)}1f">${esc(category.icon)}</span>
       <div class="env-title"><h3>${esc(category.name)}${
         tag ? ` <span class="env-tag ${type}">${tag}</span>` : ''
       }</h3><span>${rollMeta}</span></div>
-      <button class="icon-btn add" data-action="open-tx" data-category="${esc(category.id)}" data-kind="${actionKind}" title="${action} with ${esc(category.name)}" aria-label="${action} with ${esc(category.name)}">+</button>
+      <button class="icon-btn add" data-action="open-tx" data-category="${esc(category.id)}" data-kind="${actionKind}" title="${esc(actionTitle)}" aria-label="${esc(actionTitle)}">+</button>
     </div>
     <div class="env-amount">${money(balance)}</div>
     <div class="env-target">of ${target > 0 ? money(target) : 'no target'} ${
       category.rollover && balance > target && target > 0 ? '· saved up' : ''
     }</div>
+    ${statusHtml}
     <div class="bar"><span style="width:${(ratio * 100).toFixed(1)}%;background:${esc(category.color)}"></span></div>
     <div class="env-foot">
       <span>${
@@ -402,7 +480,7 @@ function envelopeCard(category, target, spent, moved) {
             ? `${money(-moved)} came back`
             : spent > 0
               ? `Spent ${money(spent)}`
-              : 'No activity yet'
+              : idleLabel
       }</span>
       ${
         over
@@ -1168,6 +1246,7 @@ function openTxModal({ id, categoryId, kind, amountPaise, description } = {}) {
     </div>
 
     <p class="hint" data-hint></p>
+    <p class="hint done-warning" data-done-warning hidden></p>
 
     <label class="field">
       <span>Note <em>optional</em></span>
@@ -1267,6 +1346,16 @@ function openHelpModal() {
     </ul>
     <p class="hint">Each type only accepts the right movement. Bills and spending accept <b>Spent</b> and <b>Refund</b>. Savings, investments and loans accept <b>Set aside</b> and <b>Money back</b>. You cannot spend directly from an investment bucket — move money to a spending bucket first.</p>
     <p class="hint">You can add as many bills, savings, investments and loans as you want. Each gets its own amount, Keep and Max setting.</p>
+
+    <h3 class="help-title">Monthly ticks</h3>
+    <ul class="help-list">
+      <li><strong>Bills</strong> tick when this month's Spent amount reaches the target.</li>
+      <li><strong>Savings</strong> tick when this month's amount is funded by Divide salary. Money already kept in the bank counts as saved.</li>
+      <li><strong>Investments</strong> tick when this month's Set aside amount reaches the target.</li>
+      <li><strong>Loans</strong> tick when this month's loan payment reaches the target.</li>
+      <li><strong>Spending</strong> has no tick; it is ongoing.</li>
+    </ul>
+    <p class="hint">The tick uses this month's activity, not the bucket balance. A transaction's date decides which month it counts in. Extra payments are allowed — you will see a warning, but the app will not block you. Editing or deleting a payment updates the tick automatically.</p>
 
     <h3 class="help-title">If the bank does not match</h3>
     <p class="hint">The app only knows what you have logged. If your bank shows less, you probably spent something and forgot to log it. Use <b>Check balance</b> → <b>Record missing expense</b>. If the bank shows more, record missing income. For a bank charge or interest, use <b>Just match totals</b>.</p>
@@ -1380,6 +1469,21 @@ function updateTxActionLabels() {
 
   form.querySelector('[data-cat-label]').textContent = catLabel;
   form.querySelector('[data-hint]').textContent = hint;
+
+  const warning = form.querySelector('[data-done-warning]');
+  if (warning) {
+    const commitment = (app.data.derived.commitments || []).find(
+      (item) => item.categoryId === category?.id
+    );
+    const outgoing = type === 'expense' || type === 'transfer';
+    if (!form.dataset.id && outgoing && commitment?.status === 'done') {
+      warning.hidden = false;
+      warning.textContent = `${category.name} is already done this month. Adding extra is allowed.`;
+    } else {
+      warning.hidden = true;
+      warning.textContent = '';
+    }
+  }
 
   const submit = form.querySelector('[data-submit-button]');
   if (submit) {

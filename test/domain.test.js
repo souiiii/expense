@@ -11,6 +11,7 @@ import {
   computeUnallocated,
   deleteTransaction,
   guessCategoryId,
+  monthlyCommitments,
   moveBetweenEnvelopes,
   reconcileBalance,
   savePlan,
@@ -601,6 +602,166 @@ test('impossible calendar dates are rejected', () => {
       }),
     (error) => error.code === 'INVALID_DATE'
   );
+});
+
+test('monthly ticks use this month activity, not bucket balances', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  let status = new Map(
+    monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item])
+  );
+  assert.equal(status.get('rent').status, 'due');
+  assert.equal(status.get('loan').status, 'due');
+  assert.equal(status.get('invest').status, 'due');
+  assert.equal(status.get('emergency').status, 'done');
+  assert.equal(status.has('groceries'), false);
+
+  addTransaction(state, {
+    date: '2026-10-05',
+    description: 'Rent paid',
+    amountPaise: P(20000),
+    direction: 'out',
+    kind: 'expense',
+    categoryId: 'rent',
+  });
+  const investPayment = addTransaction(state, {
+    date: '2026-10-06',
+    description: 'SIP',
+    amountPaise: P(15000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  addTransaction(state, {
+    date: '2026-10-07',
+    description: 'EMI',
+    amountPaise: P(12000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: 'loan',
+  });
+
+  status = new Map(monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item]));
+  assert.equal(status.get('rent').status, 'done');
+  assert.equal(status.get('invest').status, 'done');
+  assert.equal(status.get('loan').status, 'done');
+  assert.equal(state.categories.find((category) => category.id === 'invest').balancePaise, 0);
+
+  addTransaction(state, {
+    date: '2026-10-08',
+    description: 'Rent refund',
+    amountPaise: P(5000),
+    direction: 'in',
+    kind: 'expense',
+    categoryId: 'rent',
+  });
+  status = new Map(monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item]));
+  assert.equal(status.get('rent').status, 'partial');
+  assert.equal(status.get('rent').paidPaise, P(15000));
+
+  deleteTransaction(state, investPayment.id);
+  status = new Map(monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item]));
+  assert.equal(status.get('invest').status, 'due');
+});
+
+test('a later month does not tick the current month', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+  addTransaction(state, {
+    date: '2026-10-05',
+    description: 'October rent',
+    amountPaise: P(20000),
+    direction: 'out',
+    kind: 'expense',
+    categoryId: 'rent',
+  });
+  const before = new Map(
+    monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item])
+  );
+  assert.equal(before.get('rent').status, 'done');
+  const next = new Map(
+    monthlyCommitments(state, '2026-11').map((item) => [item.categoryId, item])
+  );
+  assert.equal(next.get('rent').status, 'due');
+});
+
+test('savings funded by the division tick, new buckets after division do not', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  let status = new Map(
+    monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item])
+  );
+  assert.equal(status.get('emergency').status, 'done');
+  assert.equal(status.get('emergency').fundedByDivision, true);
+
+  const payload = {
+    monthlyIncomePaise: P(100000),
+    paydayDay: 1,
+    surplusCategoryId: 'emergency',
+    categories: state.categories.map((category) => ({ ...category })).concat([
+      {
+        kind: 'fixed',
+        type: 'investment',
+        name: 'PPF',
+        targetPaise: P(5000),
+        percent: 0,
+        rollover: true,
+        capPaise: null,
+        icon: '🏦',
+        color: '#123456',
+      },
+    ]),
+  };
+  savePlan(state, payload);
+  const ppf = state.categories.find((category) => category.name === 'PPF');
+
+  status = new Map(monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item]));
+  assert.equal(status.get(ppf.id).status, 'not-in-division');
+  assert.equal(status.get(ppf.id).inDivision, false);
+
+  addTransaction(state, {
+    date: '2026-10-10',
+    description: 'PPF investment',
+    amountPaise: P(5000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: ppf.id,
+  });
+  status = new Map(monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item]));
+  assert.equal(status.get(ppf.id).status, 'done');
+});
+
+test('monthly ticks handle overpayment and refunded buckets', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  addTransaction(state, {
+    date: '2026-10-05',
+    description: 'Rent overpayment',
+    amountPaise: P(25000),
+    direction: 'out',
+    kind: 'expense',
+    categoryId: 'rent',
+  });
+  let status = new Map(
+    monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item])
+  );
+  assert.equal(status.get('rent').status, 'done');
+  assert.equal(status.get('rent').extraPaise, P(5000));
+
+  addTransaction(state, {
+    date: '2026-10-06',
+    description: 'Large rent refund',
+    amountPaise: P(30000),
+    direction: 'in',
+    kind: 'expense',
+    categoryId: 'rent',
+  });
+  status = new Map(monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item]));
+  assert.equal(status.get('rent').status, 'refunded');
+  assert.equal(status.get('rent').paidPaise, P(-5000));
 });
 
 test('demo state is internally consistent', () => {
