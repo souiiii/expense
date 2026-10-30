@@ -289,6 +289,9 @@ function dashboardView() {
   const fixed = categories.filter((category) => category.kind === 'fixed');
   const flexible = categories.filter((category) => category.kind === 'flex');
   const summary = derived.summary;
+  const allocationItems = new Map(
+    (derived.allocation?.items || []).map((item) => [item.categoryId, item])
+  );
   const commitments = new Map(
     (derived.commitments || []).map((commitment) => [commitment.categoryId, commitment])
   );
@@ -330,8 +333,15 @@ function dashboardView() {
   ${notice}
 
   <div class="stats">
-    ${statCard('Spent this month', money(summary.spentPaise), `${summary.transactionCount} transaction${summary.transactionCount === 1 ? '' : 's'}`)}
-    ${statCard('Moved out', money(summary.investedPaise), 'Net transfers this month')}
+    ${statCard('Spent this month', money(summary.spentPaise), `${summary.transactionCount} money movement${summary.transactionCount === 1 ? '' : 's'}`)}
+    ${statCard(
+      summary.investedPaise < 0 ? 'Came back' : 'Moved out',
+      money(Math.abs(summary.investedPaise)),
+      summary.investedPaise < 0
+        ? 'Withdrawals were more than new moves'
+        : 'Savings, investments, loans',
+      summary.investedPaise < 0 ? 'warm' : ''
+    )}
     ${statCard(
       'Not divided',
       money(derived.unallocatedPaise),
@@ -340,8 +350,9 @@ function dashboardView() {
     )}
   </div>
 
-  ${envelopeSection('Set aside first', fixedSubtitle, fixed, targets, summary, commitments)}
-  ${envelopeSection('Spending', 'These split what is left, by percentage.', flexible, displayTargets, summary, null)}
+  ${envelopeSection('Fixed first', fixedSubtitle, fixed, targets, summary, commitments)}
+  ${investmentPanel(derived.investments)}
+  ${envelopeSection('Spending', 'These split what is left, by percentage.', flexible, displayTargets, summary, null, allocationItems)}
 
   <section class="panel recents">
     <div class="panel-head">
@@ -356,7 +367,7 @@ function statCard(label, value, sub, tone = '') {
   return `<div class="stat ${tone}"><span>${label}</span><strong>${value}</strong><small>${sub}</small></div>`;
 }
 
-function envelopeSection(title, subtitle, categories, targets, summary, commitments) {
+function envelopeSection(title, subtitle, categories, targets, summary, commitments, allocationItems = null) {
   if (categories.length === 0) return '';
   return `<section class="section">
     <div class="section-head">
@@ -372,11 +383,71 @@ function envelopeSection(title, subtitle, categories, targets, summary, commitme
             commitment ? commitment.targetPaise : targets.get(category.id) ?? 0,
             summary.spentByCategory[category.id] ?? 0,
             summary.transferredByCategory?.[category.id] ?? 0,
-            commitment
+            commitment,
+            allocationItems?.get(category.id) ?? null
           );
         })
         .join('')}
     </div>
+  </section>`;
+}
+
+function investmentPanel(investments) {
+  if (!investments || investments.length === 0) return '';
+  return `<section class="panel invest-panel">
+    <div class="panel-head">
+      <div><h2>Your investments</h2><p>Money put in, money taken out, and what it is worth now.</p></div>
+    </div>
+    <div class="invest-list">
+      ${investments
+        .map((investment) => {
+          const gain = investment.gainPaise;
+          const gainClass =
+            gain === null
+              ? investment.worthStale
+                ? 'warn'
+                : ''
+              : gain > 0
+                ? 'positive'
+                : gain < 0
+                  ? 'negative'
+                  : '';
+          const gainText =
+            gain === null
+              ? investment.worthPaise === null
+                ? '—'
+                : !investment.hasCostBasis
+                  ? 'No history'
+                  : investment.worthStale
+                    ? 'Update worth'
+                    : '—'
+              : `${gain > 0 ? '+' : ''}${money(gain)}`;
+          return `<div class="invest-row">
+            <div class="invest-name">
+              <span class="env-icon sm" style="background:${esc(investment.color || '#8a8376')}1f">${esc(
+                investment.icon || '📈'
+              )}</span>
+              <strong>${esc(investment.name)}</strong>
+            </div>
+            <div class="invest-stat"><span>Put in</span><strong>${money(
+              investment.putInPaise
+            )}</strong></div>
+            <div class="invest-stat"><span>Took out</span><strong>${money(
+              investment.tookOutPaise
+            )}</strong></div>
+            <div class="invest-stat"><span>Worth now</span><strong>${
+              investment.worthPaise === null ? 'Not set' : money(investment.worthPaise)
+            }</strong></div>
+            <div class="invest-stat"><span>Gain / loss</span><strong class="${gainClass}">${gainText}</strong></div>
+            <button class="mini-btn" data-action="update-investment-value" data-id="${esc(
+              investment.categoryId
+            )}">${investment.worthPaise === null ? 'Set worth' : 'Update worth'}</button>
+          </div>`;
+        })
+        .join('')}
+    </div>
+    <p class="fine">Worth now is entered by you. The bucket balance is cash in your bank, not the investment's value.</p>
+    <p class="fine">Gain = worth now + took out − put in. It needs at least one Moved out entry. After you move money, update Worth now — the gain stays hidden until you do.</p>
   </section>`;
 }
 
@@ -414,7 +485,7 @@ function commitmentStatusHtml(commitment) {
   return '';
 }
 
-function envelopeCard(category, target, spent, moved, commitment) {
+function envelopeCard(category, target, spent, moved, commitment, allocationItem = null) {
   const balance = category.balancePaise;
   const ratio =
     target > 0
@@ -441,6 +512,8 @@ function envelopeCard(category, target, spent, moved, commitment) {
           : type === 'saving'
             ? 'Still in the bucket'
             : 'No spending yet';
+  const overLabel =
+    type === 'investment' ? 'cash to invest' : type === 'loan' ? 'paid extra' : 'saved up';
   const done = commitment?.status === 'done';
   const actionTitle = done
     ? type === 'bill'
@@ -452,6 +525,16 @@ function envelopeCard(category, target, spent, moved, commitment) {
           : 'Add another loan payment'
     : `${action} with ${category.name}`;
   const statusHtml = commitmentStatusHtml(commitment);
+  const carryPaise =
+    type === 'spending' && Number.isSafeInteger(allocationItem?.carryPaise)
+      ? allocationItem.carryPaise
+      : 0;
+  const carryHtml =
+    carryPaise < 0
+      ? `<div class="env-carry">Started ${money(-carryPaise)} lower · carried overspend</div>`
+      : carryPaise > 0
+        ? `<div class="env-carry positive">${money(carryPaise)} carried from last month</div>`
+        : '';
   const rollMeta = category.rollover
     ? category.capPaise !== null && category.capPaise !== undefined
       ? `Leftover stays · max ${money(category.capPaise)}`
@@ -468,9 +551,10 @@ function envelopeCard(category, target, spent, moved, commitment) {
     </div>
     <div class="env-amount">${money(balance)}</div>
     <div class="env-target">of ${target > 0 ? money(target) : 'no target'} ${
-      category.rollover && balance > target && target > 0 ? '· saved up' : ''
+      category.rollover && balance > target && target > 0 ? `· ${overLabel}` : ''
     }</div>
     ${statusHtml}
+    ${carryHtml}
     <div class="bar"><span style="width:${(ratio * 100).toFixed(1)}%;background:${esc(category.color)}"></span></div>
     <div class="env-foot">
       <span>${
@@ -484,7 +568,9 @@ function envelopeCard(category, target, spent, moved, commitment) {
       }</span>
       ${
         over
-          ? `<button class="link-btn danger" data-action="open-move" data-to="${esc(category.id)}">Cover shortage</button>`
+          ? `<button class="link-btn danger" data-action="open-move" data-to="${esc(category.id)}">${
+              type === 'spending' ? 'Cover overspend' : 'Cover shortage'
+            }</button>`
           : ''
       }
     </div>
@@ -566,7 +652,7 @@ function kindLabel(kind) {
     {
       expense: 'Spending',
       income: 'Money in',
-      transfer: 'Set aside',
+      transfer: 'Transfer',
       adjustment: 'Balance fix',
     }[kind] || kind
   );
@@ -608,7 +694,7 @@ function planView() {
     <div>
       <p class="eyebrow">Your monthly plan</p>
       <h1>Monthly plan</h1>
-      <p class="lede">Set this once. Bills, savings, investments and loans are set aside first, then the rest is split across spending buckets by percentage.</p>
+      <p class="lede">Set this once. Bills, savings, investments and loans come first, then the rest is split across spending buckets by percentage.</p>
     </div>
     <button class="btn ghost" data-action="nav" data-view="dashboard">Back to home</button>
   </div>
@@ -797,7 +883,7 @@ function updatePlanPreview() {
         ? `Your bills are ${money(fixedTotal - income)} more than your salary.`
         : !percentOk
           ? `Your spending percentages add up to ${formatPercent(percentTotal)}%. They need to equal 100%.`
-          : `Set aside ${money(fixedTotal)} + spending ${money(flexTotal)} = ${money(planned)}. ${
+          : `Fixed ${money(fixedTotal)} + spending ${money(flexTotal)} = ${money(planned)}. ${
               unplanned === 0 ? 'Every rupee is planned.' : `${money(unplanned)} is not planned.`
             }`;
 
@@ -806,7 +892,7 @@ function updatePlanPreview() {
       <span style="width:${flexWidth}%;background:#23735f"></span>
     </div>
     <div class="alloc-legend">
-      <span><i style="background:#b4643c"></i>Set aside ${money(fixedTotal)}</span>
+      <span><i style="background:#b4643c"></i>Fixed ${money(fixedTotal)}</span>
       <span><i style="background:#23735f"></i>Spending ${money(flexTotal)}</span>
       <span><i class="unplanned"></i>Not planned ${money(Math.max(0, unplanned))}</span>
     </div>
@@ -900,7 +986,7 @@ function transactionsView() {
     ['all', 'All'],
     ['expense', 'Spending'],
     ['income', 'Money in'],
-    ['transfer', 'Set aside'],
+    ['transfer', 'Transfers'],
   ];
 
   return `<div class="page-head">
@@ -1215,9 +1301,9 @@ function openTxModal({ id, categoryId, kind, amountPaise, description } = {}) {
     <div class="seg" role="radiogroup" aria-label="Type">
       ${typeOption('expense', 'Spent', initialType)}
       ${typeOption('income', 'Received', initialType)}
-      ${typeOption('transfer', 'Set aside', initialType)}
+      ${typeOption('transfer', 'Moved out', initialType)}
       ${typeOption('refund', 'Refund', initialType)}
-      ${typeOption('withdraw', 'Money back', initialType)}
+      ${typeOption('withdraw', 'Withdrawal', initialType)}
     </div>
 
     <label class="field amount-field">
@@ -1247,6 +1333,7 @@ function openTxModal({ id, categoryId, kind, amountPaise, description } = {}) {
 
     <p class="hint" data-hint></p>
     <p class="hint done-warning" data-done-warning hidden></p>
+    <p class="hint bucket-warning" data-bucket-warning hidden></p>
 
     <label class="field">
       <span>Note <em>optional</em></span>
@@ -1327,12 +1414,12 @@ function openHelpModal() {
       <div><dt>Investments</dt><dd>SIPs, PPF, stocks. The same amount every month; leftovers stay.</dd></div>
       <div><dt>Loans</dt><dd>EMIs. The same amount every month.</dd></div>
       <div><dt>Spending</dt><dd>The rest, split by percentage across everyday buckets.</dd></div>
-      <div><dt>Set aside</dt><dd>Move money into a savings, investment or loan bucket. Not spending.</dd></div>
-      <div><dt>Money back</dt><dd>Money returned from a savings, investment or loan bucket.</dd></div>
+      <div><dt>Moved out</dt><dd>Money left your bank for savings, an investment, or a loan payment. Not spending.</dd></div>
+      <div><dt>Withdrawal</dt><dd>Money came back from a savings bucket, investment, or loan.</dd></div>
       <div><dt>Divide salary</dt><dd>Press once on payday to fill all the buckets.</dd></div>
       <div><dt>Not divided</dt><dd>Money in your bank that is not in a bucket yet.</dd></div>
-      <div><dt>Keep leftover</dt><dd>That bucket's leftover stays for next month. Otherwise it starts fresh.</dd></div>
-      <div><dt>Max</dt><dd>The most a bucket can build up before extra money goes to Emergency.</dd></div>
+      <div><dt>Keep leftover</dt><dd>Positive leftover stays for next month. Overspending always carries forward, whether Keep is on or off.</dd></div>
+      <div><dt>Max</dt><dd>The most a bucket can build up before extra money goes to Emergency. It does not forgive overspending.</dd></div>
     </dl>
 
     <h3 class="help-title">How buckets behave</h3>
@@ -1340,23 +1427,40 @@ function openHelpModal() {
       <li><strong>Bills — Rent, utilities.</strong> Refill every month, get used up, then start fresh.</li>
       <li><strong>Savings — Emergency fund.</strong> Refill every month and keep their leftover.</li>
       <li><strong>Investments — SIP, PPF, stocks.</strong> Refill every month and keep their leftover.</li>
-      <li><strong>Loans — EMIs.</strong> Refill every month. Use “Set aside” to pay the lender.</li>
-      <li><strong>Spending — Groceries, transport, fun.</strong> Refill every month, then start fresh.</li>
-      <li><strong>Saving-up spending — Clothes, electronics.</strong> Refill, and keep leftover up to Max.</li>
+      <li><strong>Loans — EMIs.</strong> Refill every month. Use “Moved out” to pay the lender.</li>
+      <li><strong>Spending — Groceries, transport, fun.</strong> Refill every month, then start fresh. Overspending carries forward.</li>
+      <li><strong>Saving-up spending — Clothes, electronics.</strong> Refill, and keep leftover up to Max. Overspending carries forward.</li>
     </ul>
-    <p class="hint">Each type only accepts the right movement. Bills and spending accept <b>Spent</b> and <b>Refund</b>. Savings, investments and loans accept <b>Set aside</b> and <b>Money back</b>. You cannot spend directly from an investment bucket — move money to a spending bucket first.</p>
+    <p class="hint">Each type only accepts the right movement. Bills and spending accept <b>Spent</b> and <b>Refund</b>. Savings, investments and loans accept <b>Moved out</b> and <b>Withdrawal</b>. You cannot spend directly from an investment bucket — move money to a spending bucket first.</p>
     <p class="hint">You can add as many bills, savings, investments and loans as you want. Each gets its own amount, Keep and Max setting.</p>
+
+    <h3 class="help-title">Spending percentages</h3>
+    <p class="hint">Fixed buckets come first. A spending percentage is a share of <b>what is left</b> after bills, savings, investments and loans — not a share of your total salary or bank balance. If your salary is ₹1,00,000 and fixed buckets take ₹60,000, the spending pool is ₹40,000. Clothes at 10% gets ₹4,000. All spending percentages must add up to 100%.</p>
+
+    <h3 class="help-title">Overspending</h3>
+    <p class="hint">If you spend more than a spending bucket has, the app records the full amount and shows a minus balance. Next month the bucket gets its normal plan amount, but the overspend is deducted first. Example: Clothes plan ₹4,000, overspend ₹1,000 — next month it gets ₹3,000, not ₹4,000. The card shows “Started ₹1,000 lower · carried overspend.”</p>
+    <p class="hint">Keep leftover controls positive money only; a negative balance always carries. Max caps positive buildup, not overspending. Use <b>Cover overspend</b> on the card to clear it from another bucket. Fixed bills and EMIs are not reduced automatically — the app warns and refills them to the full target.</p>
 
     <h3 class="help-title">Monthly ticks</h3>
     <ul class="help-list">
       <li><strong>Bills</strong> tick when this month's Spent amount reaches the target.</li>
       <li><strong>Savings</strong> tick when this month's amount is funded by Divide salary. Money already kept in the bank counts as saved.</li>
-      <li><strong>Investments</strong> tick when this month's Set aside amount reaches the target.</li>
+      <li><strong>Investments</strong> tick when this month's Moved out amount reaches the target.</li>
       <li><strong>Loans</strong> tick when this month's loan payment reaches the target.</li>
       <li><strong>Spending</strong> has no tick; it is ongoing.</li>
     </ul>
     <p class="hint">The tick uses this month's activity, not the bucket balance. A transaction's date decides which month it counts in. Extra payments are allowed — you will see a warning, but the app will not block you. Editing or deleting a payment updates the tick automatically.</p>
-    <p class="hint">A <b>Money back</b> redemption is a return, not a new investment. It does not remove that month's investment tick. The app records the cash returned; it does not calculate market value or profit.</p>
+    <p class="hint">A <b>Withdrawal</b> redemption is a return, not a new investment. It does not remove that month's investment tick.</p>
+
+    <h3 class="help-title">Investments</h3>
+    <ul class="help-list">
+      <li><strong>Put in</strong> — money you moved out to this investment.</li>
+      <li><strong>Took out</strong> — money you withdrew back to your bank.</li>
+      <li><strong>Worth now</strong> — what the investment is worth today. You type it in.</li>
+      <li><strong>Gain / loss</strong> — worth now + took out − put in.</li>
+    </ul>
+    <p class="hint">The amount shown on the investment bucket is cash in your bank. It is not what the investment is worth. Update <b>Worth now</b> after you invest or withdraw so the gain stays right. The gain hides until you update it.</p>
+    <p class="hint">Record every return from an investment as <b>Withdrawal</b>, including profit. Gain needs at least one recorded <b>Moved out</b>. For an investment you already owned before using the app, the panel shows <b>No history</b> instead of guessing.</p>
 
     <h3 class="help-title">If the bank does not match</h3>
     <p class="hint">The app only knows what you have logged. If your bank shows less, you probably spent something and forgot to log it. Use <b>Check balance</b> → <b>Record missing expense</b>. If the bank shows more, record missing income. For a bank charge or interest, use <b>Just match totals</b>.</p>
@@ -1439,7 +1543,7 @@ function updateTxActionLabels() {
   } else if (type === 'transfer') {
     catLabel = 'From bucket';
     if (subtype === 'saving') {
-      hint = 'Money saved into this bucket. Not counted as spending.';
+      hint = 'Money moved from this bucket to savings. Not counted as spending.';
       action = 'Add saving';
     } else if (subtype === 'investment') {
       hint = 'Money invested from this bucket. Not counted as spending.';
@@ -1450,7 +1554,7 @@ function updateTxActionLabels() {
     }
   } else if (type === 'withdraw') {
     catLabel = 'To bucket';
-    action = 'Add money back';
+    action = 'Add withdrawal';
     if (subtype === 'saving') {
       hint = 'Money taken back from savings.';
     } else if (subtype === 'investment') {
@@ -1491,6 +1595,76 @@ function updateTxActionLabels() {
     submit.textContent = form.dataset.id ? 'Save changes' : action;
     submit.disabled = emptyOptions;
   }
+
+  updateBucketWarning();
+}
+
+function updateBucketWarning() {
+  const form = $('[data-form="tx"]');
+  if (!form) return;
+  const warning = form.querySelector('[data-bucket-warning]');
+  if (!warning) return;
+
+  const selected = form.querySelector('[name="tx-type"]:checked');
+  const select = form.querySelector('[name="categoryId"]');
+  const category = select ? categoryById(select.value) : null;
+  const amount = toPaise(form.querySelector('[name="amount"]')?.value);
+  const type = selected?.value;
+
+  if (
+    !category ||
+    !Number.isSafeInteger(amount) ||
+    amount <= 0 ||
+    (type !== 'expense' && type !== 'transfer')
+  ) {
+    warning.hidden = true;
+    warning.textContent = '';
+    return;
+  }
+
+  // If this form is editing a transaction in the same bucket, work out the
+  // balance as if that old transaction were removed first.
+  let available = category.balancePaise;
+  const existing = form.dataset.id
+    ? app.data.transactions.find((transaction) => transaction.id === form.dataset.id)
+    : null;
+  if (existing && existing.categoryId === category.id) {
+    const oldEffect =
+      existing.direction === 'in' ? existing.amountPaise : -existing.amountPaise;
+    available -= oldEffect;
+  }
+
+  const after = available - amount;
+  if (after >= 0) {
+    warning.hidden = true;
+    warning.textContent = '';
+    return;
+  }
+
+  const shortfall = -after;
+  const bucketType = categoryType(category);
+  if (bucketType === 'spending') {
+    const alreadyOver = Math.max(0, -available);
+    const consequence = app.data.derived.allocation
+      ? `Next month's ${category.name} money will be ${money(shortfall)} lower.`
+      : `When you divide this month, ${category.name} will get ${money(shortfall)} less.`;
+    if (alreadyOver > 0) {
+      warning.textContent = `${category.name} is already ${money(
+        alreadyOver
+      )} over. This adds ${money(
+        shortfall - alreadyOver
+      )}, making it ${money(shortfall)} over. ${consequence}`;
+    } else {
+      warning.textContent = `This is ${money(
+        shortfall
+      )} more than ${category.name} has. ${consequence}`;
+    }
+  } else {
+    warning.textContent = `${category.name} is ${money(
+      shortfall
+    )} short after this. The next salary division will refill it to the full target.`;
+  }
+  warning.hidden = false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1571,6 +1745,70 @@ function updateReconcilePreview() {
   }
 }
 
+function allocationWarnings(derived) {
+  const targets = new Map(derived.plan.items.map((item) => [item.categoryId, item.targetPaise]));
+  const categories = activeCategories();
+  const spending = categories.filter(
+    (category) => categoryType(category) === 'spending' && category.balancePaise < 0
+  );
+  const fixed = categories.filter(
+    (category) =>
+      ['bill', 'loan'].includes(categoryType(category)) && category.balancePaise < 0
+  );
+
+  const spendingItems = spending
+    .map((category) => {
+      const target = targets.get(category.id) ?? 0;
+      const over = -category.balancePaise;
+      const rawCarry = category.rollover
+        ? category.balancePaise
+        : Math.min(0, category.balancePaise);
+      let available = target + rawCarry;
+      if (category.capPaise !== null && category.capPaise !== undefined) {
+        available = Math.min(available, category.capPaise);
+      }
+      const appliedCarry = available - target;
+      const carryText =
+        appliedCarry < 0 ? ` · carried −${money(-appliedCarry)}` : '';
+      const availableText =
+        available >= 0
+          ? `${money(available)} available this month`
+          : `${money(-available)} still owed after this month's plan`;
+      return `<li><strong>${esc(category.name)}</strong> is ${money(
+        over
+      )} over. Plan ${money(target)}${carryText} · ${availableText}.</li>`;
+    })
+    .join('');
+
+  const fixedItems = fixed
+    .map((category) => {
+      const target = targets.get(category.id) ?? 0;
+      const refillText =
+        target > 0
+          ? `It will be refilled to its ${money(target)} target. Fixed bills and EMIs are not reduced automatically.`
+          : 'It has no plan amount, so the shortfall stays.';
+      return `<li><strong>${esc(category.name)}</strong> is ${money(
+        -category.balancePaise
+      )} short. ${refillText}</li>`;
+    })
+    .join('');
+
+  if (!spendingItems && !fixedItems) return '';
+
+  return `<div class="allocation-warnings">
+    ${
+      spendingItems
+        ? `<div class="allocation-warning spend"><strong>Overspending carried forward</strong><ul>${spendingItems}</ul><p>Each spending bucket gets its normal plan amount. The overspend reduces what is available this month.</p></div>`
+        : ''
+    }
+    ${
+      fixedItems
+        ? `<div class="allocation-warning fixed"><strong>Fixed buckets are short</strong><ul>${fixedItems}</ul><p>If the bank does not have enough, the division will stop and ask you to cover the shortfall.</p></div>`
+        : ''
+    }
+  </div>`;
+}
+
 function openAllocateModal() {
   const derived = app.data.derived;
   const surplus = categoryById(app.data.settings.surplusCategoryId);
@@ -1583,6 +1821,7 @@ function openAllocateModal() {
       ${kv('Money ready to divide', money(derived.unallocatedPaise))}
       ${kv('Leftover in buckets', 'Stays where it is')}
     </dl>
+    ${allocationWarnings(derived)}
     <p class="hint">You can undo this until you record spending or move money.</p>
     <div class="modal-actions">
       <span></span>
@@ -1593,6 +1832,32 @@ function openAllocateModal() {
     modalShell({
       title: 'Divide this month\'s salary',
       subtitle: 'Once a month. Fills every bucket.',
+      body,
+    })
+  );
+}
+
+function openInvestmentValueModal(investment) {
+  const body = `<form data-form="investment-value" data-id="${esc(investment.categoryId)}">
+    <p class="hint">Put in ${money(investment.putInPaise)} · Took out ${money(
+      investment.tookOutPaise
+    )}.</p>
+    <label class="field">
+      <span>Worth now</span>
+      <div class="money-input"><span>₹</span><input name="worth" type="number" min="0" step="0.01" value="${
+        investment.worthPaise === null ? '' : rupeesInput(investment.worthPaise)
+      }" placeholder="e.g. 22000" inputmode="decimal" required /></div>
+    </label>
+    <p class="hint">Enter what the investment is worth today, not the cash sitting in the bucket. Put 0 if you have taken everything out. This does not move any money.</p>
+    <div class="modal-actions">
+      <span></span>
+      <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Save worth</button></div>
+    </div>
+  </form>`;
+  openModal(
+    modalShell({
+      title: 'Update investment worth',
+      subtitle: 'This only updates the value shown in the app.',
       body,
     })
   );
@@ -1815,6 +2080,13 @@ async function handleAction(element) {
     case 'open-allocate':
       openAllocateModal();
       return;
+    case 'update-investment-value': {
+      const investment = (app.data.derived.investments || []).find(
+        (item) => item.categoryId === element.dataset.id
+      );
+      if (investment) openInvestmentValueModal(investment);
+      return;
+    }
     case 'open-move':
       openMoveModal(element.dataset.to);
       return;
@@ -2113,6 +2385,19 @@ document.addEventListener('submit', async (event) => {
       toast('Money moved.');
       return;
     }
+
+    if (form.dataset.form === 'investment-value') {
+      const data = new FormData(form);
+      const response = await api(`/api/investments/${form.dataset.id}/value`, {
+        method: 'POST',
+        body: { worthPaise: toPaise(data.get('worth')) },
+      });
+      acceptState(response.state);
+      closeModal();
+      render();
+      toast('Investment worth updated.');
+      return;
+    }
   } catch (error) {
     toast(error.message || 'Something went wrong.', 'error');
   } finally {
@@ -2124,6 +2409,10 @@ document.addEventListener('submit', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
+  if (event.target.name === 'amount' && event.target.closest('[data-form="tx"]')) {
+    updateBucketWarning();
+    return;
+  }
   if (event.target.closest('[data-form="reconcile"]')) {
     updateReconcilePreview();
     return;

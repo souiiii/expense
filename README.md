@@ -63,19 +63,42 @@ Each bucket has a type. The type decides how much it gets and which movements ar
 | Type | Allocation | Accepts | Leftover |
 |---|---|---|---|
 | **Bill** | fixed rupee amount | Spent, Refund | Starts fresh |
-| **Saving** | fixed rupee amount | Set aside, Money back | Stays |
-| **Investment** | fixed rupee amount | Set aside, Money back | Stays, optional Max |
-| **Loan** | fixed rupee amount | Set aside, Money back | Starts fresh |
-| **Spending** | percentage of what is left | Spent, Refund | Starts fresh, or stays for clothes/electronics |
+| **Saving** | fixed rupee amount | Moved out, Withdrawal | Stays |
+| **Investment** | fixed rupee amount | Moved out, Withdrawal | Stays, optional Max |
+| **Loan** | fixed rupee amount | Moved out, Withdrawal | Starts fresh |
+| **Spending** | percentage of what is left | Spent, Refund | Starts fresh, or stays for clothes/electronics. Overspending always carries |
 
 **You can add as many bills, savings, investments and loans as you want.** Each one has its own name, amount, Keep setting and Max. For example: “HDFC SIP” and “PPF” are two investment buckets; “Home loan” and “Education loan” are two loan buckets.
 
 The rules are enforced:
 
 - Bills and spending buckets only accept **Spent** and **Refund**. They cannot receive savings or investment money.
-- Savings, investments and loans only accept **Set aside** and **Money back**. You cannot mark a coffee as “Spent” from an investment bucket.
+- Savings, investments and loans only accept **Moved out** and **Withdrawal**. You cannot mark a coffee as “Spent” from an investment bucket.
 - Salary/income always goes to **Not divided**, never directly into a bucket.
 - Moving money between buckets is always allowed, because it is an explicit relabel. To spend from an investment, first **Move money** to a spending bucket, then log the spend.
+
+## Spending percentages and overspending
+
+The spending percentage is a share of the **spending pool**, not your total salary and not your bank balance:
+
+```
+Spending pool = take-home salary − all fixed buckets
+              = salary − (bills + savings + investments + loans)
+```
+
+For example, if salary is ₹1,00,000 and fixed buckets are ₹60,000, the spending pool is ₹40,000. Clothes at 10% gets ₹4,000. All spending percentages must add up to 100%.
+
+Overspending has a real consequence:
+
+- A spending bucket that goes negative keeps that negative balance.
+- Next month it gets its normal plan amount, but the negative is deducted first.
+- Example: Clothes plan ₹4,000, overspend ₹1,000. Next month Clothes gets **₹3,000**, not ₹4,000.
+- The card shows **“Started ₹1,000 lower · carried overspend.”**
+- If the overspend is bigger than the monthly amount, the bucket stays negative and the rest carries again.
+- **Keep leftover** applies to positive balances. A negative balance always carries.
+- **Max** caps positive buildup. It does not forgive a negative balance.
+- **Cover overspend** on the card lets you move money from another bucket to clear it immediately.
+- Fixed bills and EMIs are not reduced automatically. The app warns and refills them to their full target, because reducing next month’s rent or EMI would leave you short.
 
 ## Monthly ticks
 
@@ -85,8 +108,8 @@ Fixed buckets show a green tick when the month's plan for that bucket is covered
 |---|---|
 | **Bill** | This month's `Spent` (minus refunds) reaches the target |
 | **Saving** | The monthly amount is funded by **Divide salary**. Savings kept in the bank count as saved |
-| **Investment** | This month's `Set aside` (minus money back) reaches the target |
-| **Loan** | This month's `Set aside` loan payment reaches the target |
+| **Investment** | This month's `Moved out` reaches the target. A later withdrawal does not undo it |
+| **Loan** | This month's `Moved out` loan payment reaches the target |
 | **Spending** | No tick; it is ongoing |
 
 The tick is derived from this month's activity and the monthly division target — not from the bucket balance. That means:
@@ -98,22 +121,34 @@ The tick is derived from this month's activity and the monthly division target �
 - Extra payments are allowed. The app shows a warning, but never blocks them.
 - A bucket added after the month's division shows **“Added after this month's division”** and starts ticking next month.
 
-### Withdrawing from an investment
+### Tracking an investment
 
-- Record the money coming back as **Money back** into that investment bucket.
-- It increases your bank balance and the bucket balance. It is not spending and not ordinary income.
+Each investment bucket has its own summary panel:
+
+| Label | Meaning |
+|---|---|
+| **Put in** | Money moved out to the investment, recorded in Khaata |
+| **Took out** | Money withdrawn back from the investment |
+| **Worth now** | What the investment is worth today. You enter it manually |
+| **Gain / loss** | `Worth now + Took out − Put in` |
+
+The **bucket balance is cash in your bank**, not the investment's market value. For example: invest ₹20,000, withdraw ₹22,000, then set Worth now to ₹0. The panel shows Put in ₹20,000, Took out ₹22,000, Gain +₹2,000.
+
+- Record every return from the investment as **Withdrawal**, including profit. Recording profit separately as **Received** keeps it out of the gain calculation.
+- Update **Worth now** after a contribution or withdrawal. It is a snapshot, not a live broker price. The gain stays hidden until you update it, so a stale worth cannot look like profit.
+- Gain needs at least one recorded **Moved out** contribution. For an investment you already owned before using Khaata, the panel shows **No history** instead of pretending the whole value is profit.
 - A redemption does not remove the investment tick for the month in which you invested; it is a separate return.
 - A month with only a withdrawal and no new investment shows **“to invest”**, not “done”. The money is sitting in the bucket waiting to be reinvested.
-- The **Moved out** stat is a net cash movement for the month, so a withdrawal can make it negative.
-- The app does not calculate market value or profit. To show a gain explicitly, split the return: principal as **Money back** to the bucket, gain as **Received**. For example: ₹20,000 Money back and ₹2,000 Received from a ₹22,000 redemption.
-- Your current portfolio value and gain/loss are not tracked. Investment buckets are cash envelopes, not a portfolio ledger.
+- The dashboard stat shows **Moved out** when new moves are larger than withdrawals, and **Came back** when withdrawals are larger.
+
+The app records cash movements and a manually entered current value. It is not a full portfolio ledger: cost basis only includes contributions recorded in Khaata, and it does not fetch prices, dividends or taxes.
 
 ## The model
 
-- **Bills** (rent, utilities), **savings** (emergency fund), **investments** (SIP, PPF) and **loans** (EMIs) are fixed rupee amounts, set aside first.
+- **Bills** (rent, utilities), **savings** (emergency fund), **investments** (SIP, PPF) and **loans** (EMIs) are fixed rupee amounts and come first.
 - **Spending buckets** (groceries, transport, clothes, electronics, fun, misc) split whatever is left by percentage.
 - **Spending percentages must add up to 100%.**
-- **Keep leftover** means that bucket keeps its balance next month. **Max** stops it growing forever. Bills, loans, groceries and fun start fresh instead.
+- **Keep leftover** means positive leftover stays next month. **Max** caps positive buildup. A negative balance always carries forward and reduces the next month’s available amount. Bills, loans, groceries and fun start fresh only for positive leftovers.
 - **One division per calendar month.** It fills each bucket from the undivided bank balance. Extra money goes to the chosen bucket (Emergency by default).
 - **Undo is available until money moves.** Once you record spending or move money between buckets, the division locks and you adjust buckets instead.
 - **The bank balance never changes when you divide or move money.** Dividing is just labelling money that is already there.
@@ -130,10 +165,10 @@ Because then buying clothes quietly shrinks your rent and EMI capacity, and no b
 | Rent, utilities | Spent | Bill |
 | Groceries, clothes, fun | Spent | Spending |
 | Salary, interest | Received | Not divided (no bucket) |
-| SIP, PPF, stocks | Set aside | Investment |
-| Emergency fund deposit | Set aside | Saving |
-| Loan EMI | Set aside | Loan |
-| Withdrawal / redemption | Money back | Saving / investment / loan |
+| SIP, PPF, stocks | Moved out | Investment |
+| Emergency fund deposit | Moved out | Saving |
+| Loan EMI | Moved out | Loan |
+| Withdrawal / redemption | Withdrawal | Saving / investment / loan |
 | Return / cashback | Refund | Spending / bill |
 | Bank mismatch | Check bank balance | Balance fix, no bucket |
 
@@ -190,7 +225,7 @@ Checking the bank balance is what keeps this honest: alerts can be missed, dupli
 ## Known limits
 
 - Khaata is a **record of cash movements**, not a live bank connection. It only knows what you log or send to the ingest endpoint.
-- Investment buckets track money moved toward investing, not portfolio value. Loan buckets track money paid toward an EMI, not the outstanding loan balance.
+- Investment buckets track cash moved toward investing. The investment panel adds a manually entered current worth and gain/loss, but it is not a full portfolio ledger: no live prices, dividends, taxes, or cost basis from before you started using Khaata. Loan buckets track money paid toward an EMI, not the outstanding loan balance.
 - It handles one bank balance. Split accounts, credit cards and cash wallets are not separate ledgers.
 - The starting balance is captured when you set up. Do not re-add transactions that happened before setup; they are already inside that balance.
 - A bucket's type is chosen when it is created. To change it, move its balance to **Not divided**, remove it, and add it under the new type.

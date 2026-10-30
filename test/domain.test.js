@@ -11,11 +11,13 @@ import {
   computeUnallocated,
   deleteTransaction,
   guessCategoryId,
+  investmentSummaries,
   monthlyCommitments,
   moveBetweenEnvelopes,
   reconcileBalance,
   savePlan,
   undoAllocation,
+  updateInvestmentValue,
   updateTransaction,
 } from '../lib/domain.js';
 
@@ -158,7 +160,7 @@ test('rollover envelope keeps its leftover and adds the new month target', () =>
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(7000));
 });
 
-test('rollover bucket covers an overspend before keeping a leftover', () => {
+test('spending overspend reduces the next month available amount', () => {
   const state = funded();
   allocateMonth(state, '2026-10');
 
@@ -173,9 +175,59 @@ test('rollover bucket covers an overspend before keeping a leftover', () => {
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(-1000));
 
   addIncome(state, 100000, '2026-10-01');
-  allocateMonth(state, '2026-11');
+  const allocation = allocateMonth(state, '2026-11');
+  const clothes = allocation.items.find((item) => item.categoryId === 'clothes');
 
-  assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(4000));
+  assert.equal(clothes.carryPaise, P(-1000));
+  assert.equal(clothes.targetPaise, P(4000));
+  assert.equal(clothes.availablePaise, P(3000));
+  assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(3000));
+});
+
+test('non-rollover spending buckets also carry an overspend', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  addTransaction(state, {
+    date: '2026-10-05',
+    description: 'Big grocery run',
+    amountPaise: P(13000),
+    direction: 'out',
+    kind: 'expense',
+    categoryId: 'groceries',
+  });
+  assert.equal(state.categories.find((c) => c.id === 'groceries').balancePaise, P(-1000));
+
+  addIncome(state, 100000, '2026-10-01');
+  const allocation = allocateMonth(state, '2026-11');
+  const groceries = allocation.items.find((item) => item.categoryId === 'groceries');
+
+  assert.equal(groceries.carryPaise, P(-1000));
+  assert.equal(groceries.availablePaise, P(11000));
+  assert.equal(state.categories.find((c) => c.id === 'groceries').balancePaise, P(11000));
+});
+
+test('fixed bills and loans refill to their full target, not less', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  addTransaction(state, {
+    date: '2026-10-05',
+    description: 'Rent plus late fee',
+    amountPaise: P(21000),
+    direction: 'out',
+    kind: 'expense',
+    categoryId: 'rent',
+  });
+  assert.equal(state.categories.find((c) => c.id === 'rent').balancePaise, P(-1000));
+
+  addIncome(state, 100000, '2026-10-01');
+  const allocation = allocateMonth(state, '2026-11');
+  const rent = allocation.items.find((item) => item.categoryId === 'rent');
+
+  assert.equal(rent.carryPaise, 0);
+  assert.equal(rent.availablePaise, P(20000));
+  assert.equal(state.categories.find((c) => c.id === 'rent').balancePaise, P(20000));
 });
 
 test('rollover envelope respects its cap', () => {
@@ -808,6 +860,122 @@ test('an investment withdrawal does not undo the month investment tick', () => {
   assert.equal(status.get('invest').paidPaise, 0);
 });
 
+test('investment summary tracks put in, took out, worth and gain', () => {
+  const state = funded();
+  addTransaction(state, {
+    date: '2026-10-01',
+    description: 'First SIP',
+    amountPaise: P(12000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  addTransaction(state, {
+    date: '2026-10-02',
+    description: 'Second SIP',
+    amountPaise: P(8000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  addTransaction(state, {
+    date: '2026-10-03',
+    description: 'Redemption',
+    amountPaise: P(22000),
+    direction: 'in',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+
+  let investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.putInPaise, P(20000));
+  assert.equal(investment.tookOutPaise, P(22000));
+  assert.equal(investment.worthPaise, null);
+  assert.equal(investment.hasCostBasis, true);
+  assert.equal(investment.gainPaise, null);
+
+  updateInvestmentValue(state, 'invest', 0);
+  investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.worthPaise, 0);
+  assert.equal(investment.gainPaise, P(2000));
+
+  updateInvestmentValue(state, 'invest', P(22000));
+  investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.gainPaise, P(24000));
+
+  assert.throws(
+    () => updateInvestmentValue(state, 'rent', 0),
+    (error) => error.code === 'INVALID_TYPE'
+  );
+
+  const view = clientState(state, '2026-10');
+  assert.equal(view.derived.investments[0].gainPaise, P(24000));
+});
+
+test('investment gain is not guessed without a recorded contribution', () => {
+  const state = funded();
+  updateInvestmentValue(state, 'invest', P(16000));
+
+  let investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.putInPaise, 0);
+  assert.equal(investment.worthPaise, P(16000));
+  assert.equal(investment.hasCostBasis, false);
+  assert.equal(investment.gainPaise, null);
+
+  addTransaction(state, {
+    date: '2026-10-03',
+    description: 'Old investment withdrawal',
+    amountPaise: P(22000),
+    direction: 'in',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.tookOutPaise, P(22000));
+  assert.equal(investment.gainPaise, null);
+  assert.equal(investment.worthStale, true);
+
+  updateInvestmentValue(state, 'invest', null);
+  investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.worthPaise, null);
+  assert.equal(investment.gainPaise, null);
+  assert.equal(investment.worthStale, false);
+});
+
+test('investment gain hides after a movement until worth is updated', () => {
+  const state = funded();
+  addTransaction(state, {
+    date: '2026-10-01',
+    description: 'SIP',
+    amountPaise: P(20000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  updateInvestmentValue(state, 'invest', P(22000));
+
+  let investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.worthStale, false);
+  assert.equal(investment.gainPaise, P(2000));
+
+  addTransaction(state, {
+    date: '2026-10-02',
+    description: 'Partial withdrawal',
+    amountPaise: P(5000),
+    direction: 'in',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.worthStale, true);
+  assert.equal(investment.gainPaise, null);
+
+  updateInvestmentValue(state, 'invest', P(17000));
+  investment = investmentSummaries(state).find((item) => item.categoryId === 'invest');
+  assert.equal(investment.worthStale, false);
+  assert.equal(investment.gainPaise, P(2000));
+});
+
 test('demo state is internally consistent', () => {
   const state = createDemoState();
   const envelopes = state.categories.reduce((sum, c) => sum + c.balancePaise, 0);
@@ -819,4 +987,7 @@ test('demo state is internally consistent', () => {
   assert.equal(view.derived.setupRequired, false);
   assert.ok(view.derived.summary.spentPaise >= 0);
   assert.ok(view.derived.plan.totalPaise <= view.derived.plan.incomePaise);
+  const demoInvestment = view.derived.investments.find((item) => item.categoryId === 'invest');
+  assert.equal(demoInvestment.worthStale, false);
+  assert.equal(demoInvestment.gainPaise, P(1000));
 });

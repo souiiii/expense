@@ -1045,6 +1045,17 @@ input[type="number"] {
   font-weight: 500;
 }
 
+.env-carry {
+  margin: -4px 0 9px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--warm);
+}
+
+.env-carry.positive {
+  color: var(--green);
+}
+
 .env-card.is-done {
   border-color: #cfe0d5;
 }
@@ -1055,6 +1066,59 @@ input[type="number"] {
   border-radius: 10px;
   padding: 9px 11px;
   color: #7c541d;
+}
+
+.bucket-warning {
+  background: #fbeee9;
+  border: 1px solid #e6c4b8;
+  border-radius: 10px;
+  padding: 9px 11px;
+  color: #8a3f2a;
+}
+
+.allocation-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.allocation-warning {
+  border-radius: 12px;
+  padding: 11px 13px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.allocation-warning.spend {
+  background: #fbf1df;
+  border: 1px solid #e9d4ab;
+  color: #7c541d;
+}
+
+.allocation-warning.fixed {
+  background: #fbeee9;
+  border: 1px solid #e6c4b8;
+  color: #8a3f2a;
+}
+
+.allocation-warning strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.allocation-warning ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.allocation-warning li {
+  margin: 3px 0;
+}
+
+.allocation-warning p {
+  margin: 6px 0 0;
+  color: inherit;
 }
 
 .bar {
@@ -1094,6 +1158,79 @@ input[type="number"] {
 
 .recents {
   margin-top: 6px;
+}
+
+.invest-panel {
+  margin: 0 0 28px;
+}
+
+.invest-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.invest-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.3fr) repeat(4, minmax(82px, 1fr)) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 4px;
+  border-top: 1px solid #eee8dc;
+}
+
+.invest-row:first-child {
+  border-top: 0;
+}
+
+.invest-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.invest-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invest-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.invest-stat span {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.invest-stat strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.invest-stat strong.positive {
+  color: var(--green);
+}
+
+.invest-stat strong.negative {
+  color: var(--danger);
+}
+
+.invest-stat strong.warn {
+  color: var(--warm);
+  font-size: 11.5px;
+}
+
+.invest-panel .fine {
+  margin-top: 10px;
 }
 
 .panel-head {
@@ -2367,6 +2504,21 @@ code.token {
 
   .env-grid {
     grid-template-columns: 1fr;
+  }
+
+  .invest-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 14px 4px;
+  }
+
+  .invest-name {
+    grid-column: 1 / -1;
+  }
+
+  .invest-row .mini-btn {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .filters {

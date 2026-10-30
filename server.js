@@ -24,6 +24,7 @@ import {
   todayString,
   undoAllocation,
   updateTransaction,
+  updateInvestmentValue,
 } from './lib/domain.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -107,7 +108,15 @@ function validateImportedState(data) {
       category.percent > 100 ||
       (category.capPaise !== null &&
         category.capPaise !== undefined &&
-        (!Number.isSafeInteger(category.capPaise) || category.capPaise < 0))
+        (!Number.isSafeInteger(category.capPaise) || category.capPaise < 0)) ||
+      (category.currentValuePaise !== null &&
+        category.currentValuePaise !== undefined &&
+        (!Number.isSafeInteger(category.currentValuePaise) ||
+          category.currentValuePaise < 0)) ||
+      (category.currentValueAt !== null &&
+        category.currentValueAt !== undefined &&
+        (typeof category.currentValueAt !== 'string' ||
+          Number.isNaN(Date.parse(category.currentValueAt))))
     ) {
       throw new AppError('INVALID_BACKUP', 'The backup contains an invalid bucket.', 400);
     }
@@ -422,6 +431,19 @@ async function handleApi(req, res, url) {
     const allocation = undoAllocation(state, undoMatch[1]);
     store.save();
     return sendJson(res, 200, stateResponse({ allocation }));
+  }
+
+  const investmentValueMatch = pathname.match(/^\/api\/investments\/([^/]+)\/value$/);
+  if (investmentValueMatch && req.method === 'POST') {
+    const body = await readJson(req);
+    const state = store.get();
+    const category = updateInvestmentValue(
+      state,
+      investmentValueMatch[1],
+      body.worthPaise
+    );
+    store.save();
+    return sendJson(res, 200, stateResponse({ category }));
   }
 
   if (req.method === 'POST' && pathname === '/api/reconcile') {
