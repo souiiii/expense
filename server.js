@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { paymentTotal, replayBudgets } from './lib/budget.js';
 import { createStore } from './lib/store.js';
 import { createState, createDemoState, fitDefaultsToIncome } from './lib/seed.js';
 import {
@@ -12,6 +13,10 @@ import {
   allocateMonth,
   categoryType,
   clientState,
+  classifyAdjustment,
+  reversePayment,
+  settleBill,
+  updateInvestmentHistory,
   deleteTransaction,
   guessCategoryId,
   isValidDate,
@@ -129,6 +134,7 @@ function validateImportedState(data) {
     throw new AppError('INVALID_BACKUP', 'The backup has no buckets.', 400);
   }
 
+  const transactionIds = new Set();
   for (const transaction of data.transactions) {
     if (
       !transaction ||
@@ -139,17 +145,69 @@ function validateImportedState(data) {
       transaction.amountPaise < 1 ||
       !['in', 'out'].includes(transaction.direction) ||
       !['expense', 'income', 'transfer', 'adjustment'].includes(transaction.kind) ||
+      transactionIds.has(transaction.id) ||
+      typeof transaction.description !== 'string' ||
+      typeof transaction.createdAt !== 'string' || Number.isNaN(Date.parse(transaction.createdAt)) ||
+      (transaction.categoryId && !categoryIds.has(transaction.categoryId)) ||
+      (['expense', 'transfer'].includes(transaction.kind) && !transaction.categoryId) ||
+      (transaction.budgetPeriod && !/^\d{4}-(0[1-9]|1[0-2])$/.test(transaction.budgetPeriod)) ||
       (transaction.categoryId !== null &&
         transaction.categoryId !== undefined &&
         typeof transaction.categoryId !== 'string')
     ) {
       throw new AppError('INVALID_BACKUP', 'The backup contains an invalid transaction.', 400);
     }
+    transactionIds.add(transaction.id);
+    if (transaction.categoryId) {
+      const type = categoryType(data.categories.find(c => c.id === transaction.categoryId));
+      if ((transaction.kind === 'expense' && !['bill', 'spending'].includes(type)) ||
+          (transaction.kind === 'transfer' && !['saving', 'investment', 'loan'].includes(type))) {
+        throw new AppError('INVALID_BACKUP', 'A transaction has the wrong bucket type.');
+      }
+    }
   }
 
+  for (const t of data.transactions.filter(t => t.reversalOf)) {
+    const payment = data.transactions.find(p => p.id === t.reversalOf);
+    const reversed = data.transactions.filter(r => r.reversalOf === t.reversalOf).reduce((n, r) => n + r.amountPaise, 0);
+    if (!payment || payment.direction !== 'out' || t.direction !== 'in' || payment.categoryId !== t.categoryId || payment.kind !== t.kind || reversed > payment.amountPaise) throw new AppError('INVALID_BACKUP', 'A payment reversal is invalid.');
+  }
+
+  if (data.moves != null && !Array.isArray(data.moves)) throw new AppError('INVALID_BACKUP', 'Budget moves must be a list.');
+  for (const move of data.moves || []) {
+    if (!move || !Number.isSafeInteger(move.amountPaise) || move.amountPaise < 1 ||
+        !move.createdAt || Number.isNaN(Date.parse(move.createdAt)) ||
+        (move.date && !isValidDate(move.date)) ||
+        (move.fromCategoryId && !categoryIds.has(move.fromCategoryId)) ||
+        (move.toCategoryId && !categoryIds.has(move.toCategoryId)) ||
+        move.fromCategoryId === move.toCategoryId) throw new AppError('INVALID_BACKUP', 'A budget move is invalid.');
+  }
+
+  const periods = new Set();
   for (const allocation of data.allocations) {
-    if (!allocation || typeof allocation.period !== 'string' || !Array.isArray(allocation.items)) {
+    if (!allocation || !/^\d{4}-(0[1-9]|1[0-2])$/.test(allocation.period) || periods.has(allocation.period) || !Array.isArray(allocation.items) || !allocation.createdAt || Number.isNaN(Date.parse(allocation.createdAt))) {
       throw new AppError('INVALID_BACKUP', 'The backup contains an invalid division.', 400);
+    }
+    periods.add(allocation.period);
+    for (const item of allocation.items) if (!categoryIds.has(item.categoryId) || !Number.isSafeInteger(item.deltaPaise) || !Number.isSafeInteger(item.targetPaise) || item.targetPaise < 0) throw new AppError('INVALID_BACKUP', 'A division amount is invalid.');
+    if (allocation.snapshot) {
+      const specs = allocation.snapshot.categories;
+      if (!Array.isArray(specs) || !specs.length || !Array.isArray(allocation.fundings) || !allocation.fundings.length || new Set(specs.map(c => c.id)).size !== specs.length) throw new AppError('INVALID_BACKUP', 'The budget snapshot is invalid.');
+      for (const spec of specs) if (!categoryIds.has(spec.id) || !['bill','loan','saving','investment','spending'].includes(spec.type) || !Number.isSafeInteger(spec.targetPaise) || spec.targetPaise < 0 || (spec.capPaise != null && (!Number.isSafeInteger(spec.capPaise) || spec.capPaise < 0))) throw new AppError('INVALID_BACKUP', 'The budget rules are invalid.');
+      for (const funding of allocation.fundings) {
+        if (!funding || !isValidDate(funding.date) || !funding.createdAt || Number.isNaN(Date.parse(funding.createdAt)) || !funding.amounts || typeof funding.amounts !== 'object') throw new AppError('INVALID_BACKUP', 'The funding history is invalid.');
+        for (const [id, amount] of Object.entries(funding.amounts)) if (!specs.some(c => c.id === id) || !Number.isSafeInteger(amount) || amount < 0) throw new AppError('INVALID_BACKUP', 'A funding amount is invalid.');
+      }
+    }
+  }
+  if (data.budgetBase && (typeof data.budgetBase !== 'object' || Array.isArray(data.budgetBase) || Object.entries(data.budgetBase).some(([id, n]) => !categoryIds.has(id) || !Number.isSafeInteger(n)))) throw new AppError('INVALID_BACKUP', 'Opening bucket balances are invalid.');
+  if (data.billOverrides && (!Array.isArray(data.billOverrides) || data.billOverrides.some(b => !b || !categoryIds.has(b.categoryId) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(b.period) || (b.amountPaise != null && (!Number.isSafeInteger(b.amountPaise) || b.amountPaise < 0)) || (b.openingPaidPaise != null && (!Number.isSafeInteger(b.openingPaidPaise) || b.openingPaidPaise < 0))))) throw new AppError('INVALID_BACKUP', 'Bill history is invalid.');
+  if (settings.openingDate && (!isValidDate(settings.openingDate) || settings.openingDate > todayString())) throw new AppError('INVALID_BACKUP', 'Starting date is invalid.');
+  if (data.planVersions != null) {
+    if (!Array.isArray(data.planVersions)) throw new AppError('INVALID_BACKUP', 'Plan history is invalid.');
+    for (const plan of data.planVersions) {
+      if (!plan || !/^\d{4}-(0[1-9]|1[0-2])$/.test(plan.effectivePeriod) || !plan.createdAt || Number.isNaN(Date.parse(plan.createdAt)) || !Array.isArray(plan.categories)) throw new AppError('INVALID_BACKUP', 'Plan history is invalid.');
+      for (const c of plan.categories) if (!categoryIds.has(c.id) || !Number.isSafeInteger(c.targetPaise) || c.targetPaise < 0) throw new AppError('INVALID_BACKUP', 'A historical plan amount is invalid.');
     }
   }
 
@@ -182,8 +240,17 @@ function parseRupees(value) {
   return Number(String(value).replace(/[₹,\s]/g, ''));
 }
 
-function stateResponse(extra = {}) {
-  return { state: clientState(store.get()), ...extra };
+function stateResponse(extra = {}, period = periodOf()) {
+  return { state: clientState(store.get(), period), ...extra };
+}
+
+function settleFromTransaction(state, transaction, body) {
+  if (typeof body.settleBill !== 'boolean' || transaction.direction !== 'out') return;
+  const category = state.categories.find(c => c.id === transaction.categoryId);
+  if (!category || !['bill', 'loan'].includes(categoryType(category))) return;
+  const period = transaction.budgetPeriod || transaction.date.slice(0, 7);
+  settleBill(state, category.id, {period, settled: body.settleBill,
+    amountPaise: body.settleBill ? Math.max(0, paymentTotal(state, category.id, period)) : null});
 }
 
 function handleSetup(body) {
@@ -205,16 +272,12 @@ function handleSetup(body) {
   });
   fitDefaultsToIncome(state);
 
-  let warning = null;
-  try {
-    allocateMonth(state);
-  } catch (error) {
-    if (!(error instanceof AppError) || error.code !== 'INSUFFICIENT_FUNDS') throw error;
-    warning = `${rupeesText(error.details.shortfallPaise)} short of this month's plan. Add the salary or change the plan, then divide again.`;
-  }
-
+  const openingDate = body.openingDate || todayString();
+  if (!isValidDate(openingDate) || openingDate > todayString()) throw new AppError('INVALID_DATE', 'Choose a valid starting date.');
+  state.settings.openingDate = openingDate;
+  state.settings.planConfirmed = false;
   store.set(state);
-  return stateResponse({ warning });
+  return stateResponse({ warning: null });
 }
 
 function handleIngest(req, url, body) {
@@ -331,13 +394,16 @@ function handleIngest(req, url, body) {
 
 async function handleApi(req, res, url) {
   const pathname = decodeURIComponent(url.pathname);
+  const selectedPeriod = url.searchParams.get('period') || periodOf();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedPeriod)) throw new AppError('INVALID_PERIOD', 'Choose a valid month.');
+  const reply = (extra = {}) => stateResponse(extra, selectedPeriod);
 
   if (req.method === 'GET' && pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, time: new Date().toISOString() });
   }
 
   if (req.method === 'GET' && pathname === '/api/state') {
-    return sendJson(res, 200, stateResponse());
+    return sendJson(res, 200, reply());
   }
 
   if (req.method === 'GET' && pathname === '/api/export') {
@@ -359,60 +425,86 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     const restored = validateImportedState(body);
     try {
+      replayBudgets(restored);
       clientState(restored);
     } catch {
       throw new AppError('INVALID_BACKUP', 'That backup could not be read by the app.', 400);
     }
     store.set(restored);
-    return sendJson(res, 200, stateResponse());
+    return sendJson(res, 200, reply());
   }
 
   if (req.method === 'POST' && pathname === '/api/reset') {
     store.set(createState());
-    return sendJson(res, 200, stateResponse());
+    return sendJson(res, 200, reply());
   }
 
   if (req.method === 'POST' && pathname === '/api/token') {
-    rotateIngestToken(store.get());
-    store.save();
-    return sendJson(res, 200, stateResponse());
+    const state = structuredClone(store.get());
+    rotateIngestToken(state);
+    store.set(state);
+    return sendJson(res, 200, reply());
   }
 
   if (req.method === 'POST' && pathname === '/api/transactions') {
     const body = await readJson(req);
-    const state = store.get();
-    const transaction = addTransaction(state, body);
-    store.save();
-    return sendJson(res, 200, stateResponse({ transaction }));
+    const state = structuredClone(store.get());
+    const transaction = body.adjustmentId ? classifyAdjustment(state, body.adjustmentId, body) : addTransaction(state, body);
+    settleFromTransaction(state, transaction, body);
+    store.set(state);
+    return sendJson(res, 200, reply({ transaction }));
+  }
+
+  const reverseMatch = pathname.match(/^\/api\/transactions\/([^/]+)\/reverse$/);
+  if (reverseMatch && req.method === 'POST') {
+    const body = await readJson(req);
+    const state = structuredClone(store.get());
+    const transaction = reversePayment(state, reverseMatch[1], body.amountPaise);
+    store.set(state);
+    return sendJson(res, 200, reply({transaction}));
+  }
+  const billMatch = pathname.match(/^\/api\/bills\/([^/]+)$/);
+  if (billMatch && req.method === 'POST') {
+    const body = await readJson(req);
+    const state = structuredClone(store.get());
+    const bill = settleBill(state, billMatch[1], body);
+    store.set(state);
+    return sendJson(res, 200, reply({bill}));
   }
 
   const txMatch = pathname.match(/^\/api\/transactions\/([^/]+)$/);
   if (txMatch && req.method === 'PUT') {
     const body = await readJson(req);
-    const state = store.get();
+    const state = structuredClone(store.get());
     const transaction = updateTransaction(state, txMatch[1], body);
-    store.save();
-    return sendJson(res, 200, stateResponse({ transaction }));
+    settleFromTransaction(state, transaction, body);
+    store.set(state);
+    return sendJson(res, 200, reply({ transaction }));
   }
 
   if (txMatch && req.method === 'DELETE') {
-    const state = store.get();
+    const state = structuredClone(store.get());
     const transaction = deleteTransaction(state, txMatch[1]);
-    store.save();
-    return sendJson(res, 200, stateResponse({ transaction }));
+    store.set(state);
+    return sendJson(res, 200, reply({ transaction }));
   }
 
   if (req.method === 'PUT' && pathname === '/api/plan') {
     const body = await readJson(req);
-    const state = store.get();
+    const state = structuredClone(store.get());
     const result = savePlan(state, body);
-    store.save();
-    return sendJson(res, 200, stateResponse({ plan: result }));
+    for (const raw of body.categories) {
+      if (!raw.alreadyPaid || !['bill', 'loan'].includes(raw.type)) continue;
+      const category = state.categories.find(c => c.name.toLowerCase() === raw.name.trim().toLowerCase() && !c.archived);
+      settleBill(state, category.id, {period: body.period || selectedPeriod, amountPaise: category.targetPaise, settled: true});
+    }
+    store.set(state);
+    return sendJson(res, 200, reply({ plan: result }));
   }
 
   if (req.method === 'POST' && pathname === '/api/allocate') {
     const body = await readJson(req);
-    const state = store.get();
+    const state = structuredClone(store.get());
     let period = periodOf();
     if (body.period !== undefined) {
       if (typeof body.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(body.period)) {
@@ -420,47 +512,51 @@ async function handleApi(req, res, url) {
       }
       period = body.period;
     }
-    const allocation = allocateMonth(state, period);
-    store.save();
-    return sendJson(res, 200, stateResponse({ allocation }));
+    const nextMonth = todayString(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1)).slice(0, 7);
+    if (period < periodOf() || period > nextMonth) throw new AppError('INVALID_PERIOD', 'Fund this month or next month. Past budgets are available in History.');
+    if (state.settings.planConfirmed === false) throw new AppError('PLAN_NOT_CONFIRMED', 'Review and save your plan first.');
+    const allocation = allocateMonth(state, period, {partial: Boolean(body.partial)});
+    store.set(state);
+    return sendJson(res, 200, reply({ allocation }));
   }
 
   const undoMatch = pathname.match(/^\/api\/allocations\/([^/]+)\/undo$/);
   if (undoMatch && req.method === 'POST') {
-    const state = store.get();
+    const state = structuredClone(store.get());
     const allocation = undoAllocation(state, undoMatch[1]);
-    store.save();
-    return sendJson(res, 200, stateResponse({ allocation }));
+    store.set(state);
+    return sendJson(res, 200, reply({ allocation }));
   }
 
   const investmentValueMatch = pathname.match(/^\/api\/investments\/([^/]+)\/value$/);
   if (investmentValueMatch && req.method === 'POST') {
     const body = await readJson(req);
-    const state = store.get();
+    const state = structuredClone(store.get());
     const category = updateInvestmentValue(
       state,
       investmentValueMatch[1],
       body.worthPaise
     );
-    store.save();
-    return sendJson(res, 200, stateResponse({ category }));
+    if (Object.hasOwn(body, 'openingCostPaise')) updateInvestmentHistory(state, investmentValueMatch[1], body.openingCostPaise);
+    store.set(state);
+    return sendJson(res, 200, reply({ category }));
   }
 
   if (req.method === 'POST' && pathname === '/api/reconcile') {
     const body = await readJson(req);
-    const state = store.get();
+    const state = structuredClone(store.get());
     const balance = requirePaise(body.balancePaise, 'Bank balance', { min: 0 });
     const adjustment = reconcileBalance(state, balance, body.note);
-    store.save();
-    return sendJson(res, 200, stateResponse({ adjustment }));
+    store.set(state);
+    return sendJson(res, 200, reply({ adjustment }));
   }
 
   if (req.method === 'POST' && pathname === '/api/move') {
     const body = await readJson(req);
-    const state = store.get();
+    const state = structuredClone(store.get());
     const move = moveBetweenEnvelopes(state, body);
-    store.save();
-    return sendJson(res, 200, stateResponse({ move }));
+    store.set(state);
+    return sendJson(res, 200, reply({ move }));
   }
 
   if (req.method === 'POST' && pathname === '/api/ingest') {

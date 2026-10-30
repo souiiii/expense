@@ -1,2542 +1,325 @@
-const app = {
-  data: null,
-  view: 'dashboard',
-  txKind: 'all',
-  txSearch: '',
-  planDirty: false,
-  modalOpen: false,
-  pendingConfirm: null,
-  lastStateJson: '',
-};
+const app = { data: null, view: location.hash.slice(1) || 'dashboard', period: sessionStorage.getItem('khaata-month') || '', modal: false, busy: false, dirty: false, search: '', filter: 'all' };
+const $ = (s, root = document) => root.querySelector(s);
+const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => new Intl.NumberFormat('en-IN', {style:'currency',currency:'INR',maximumFractionDigits: Math.abs(n || 0) % 100 ? 2 : 0}).format((n || 0) / 100);
+const paise = n => Math.round(Number(n) * 100);
+const rupees = n => n == null ? '' : n / 100;
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+const monthName = p => new Date(`${p}-01T12:00:00`).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+const cat = id => app.data.categories.find(c => c.id === id);
+const active = () => app.data.categories.filter(c => !c.archived);
+const type = c => c.type || (c.kind === 'flex' ? 'spending' : 'bill');
+const currentMonth = () => today().slice(0,7);
+const historical = () => app.period < currentMonth();
+const logo = `<span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="3" y="6" width="26" height="6" rx="3" fill="currentColor"/><rect x="3" y="15" width="19" height="6" rx="3" fill="currentColor" opacity=".6"/><rect x="3" y="24" width="23" height="5" rx="2" fill="currentColor" opacity=".3"/></svg></span>`;
+const brand = () => `<div class="brand">${logo}<span>Khaata<span class="brand-dot">.</span></span></div>`;
+const button = (label, action, attrs = '', style = 'ghost') => `<button type="button" class="btn ${style}" data-action="${action}" ${attrs}>${label}</button>`;
+const amountField = (label, name, value = '', required = true) => `<label class="field"><span>${label}</span><div class="money-input"><span>₹</span><input name="${name}" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(value)}" ${required ? 'required' : ''}/></div></label>`;
+const monthOptions = (selected, fundingOnly = false) => [...new Set([...(app.data?.derived.periods || []), selected, currentMonth(), today().slice(0,7)])].filter(p => !fundingOnly || p >= currentMonth()).sort().reverse().map(p => `<option value="${p}" ${p===selected?'selected':''}>${monthName(p)}</option>`).join('');
 
-const VIEWS = ['dashboard', 'plan', 'transactions', 'settings'];
-const UNALLOCATED_ID = '__unallocated__';
-
-const PALETTE = [
-  '#b4643c',
-  '#7d6a9e',
-  '#23735f',
-  '#3f6b8e',
-  '#6c8a45',
-  '#a8842f',
-  '#b05f70',
-  '#567797',
-  '#c27642',
-  '#8a8376',
-];
-
-const ICONS = {
-  dashboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>`,
-  plan: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h8"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M12 17h8"/><circle cx="9.5" cy="17" r="2"/></svg>`,
-  transactions: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16"/><path d="M4 12h16"/><path d="M4 17.5h11"/><circle cx="19.5" cy="17.5" r="1.1" fill="currentColor" stroke="none"/></svg>`,
-  settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v2.1M12 19.3v2.1M4.6 4.6l1.5 1.5M17.9 17.9l1.5 1.5M2.6 12h2.1M19.3 12h2.1M4.6 19.4l1.5-1.5M17.9 6.1l1.5-1.5"/></svg>`,
-  help: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.6 2.6 0 1 1 3.4 2.5c-.9.3-1.4 1-1.4 1.9v.3"/><circle cx="11.4" cy="17.2" r=".9" fill="currentColor" stroke="none"/></svg>`,
-};
-
-const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="6" width="26" height="6" rx="3" fill="currentColor" opacity=".96"/><rect x="3" y="14.5" width="19" height="6" rx="3" fill="currentColor" opacity=".55"/><rect x="3" y="23" width="23" height="6" rx="3" fill="currentColor" opacity=".3"/></svg>`;
-
-const moneyFmt = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0,
-});
-const moneyExactFmt = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 2,
-});
-
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-
-const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ESCAPES[char]);
-const money = (paise, exact = false) => {
-  const value = Number(paise) || 0;
-  const formatter = exact || Math.abs(value) % 100 !== 0 ? moneyExactFmt : moneyFmt;
-  return formatter.format(value / 100);
-};
-const rupeesInput = (paise) => (Number(paise) || 0) / 100;
-const toPaise = (value) => {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.round(number * 100) : 0;
-};
-const formatPercent = (value) => {
-  const number = Number(value) || 0;
-  return Number.isInteger(number) ? String(number) : String(Math.round(number * 100) / 100);
-};
-
-function todayStr() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-    date.getDate()
-  ).padStart(2, '0')}`;
-}
-
-function viewFromHash() {
-  const view = location.hash.replace(/^#\/?/, '');
-  return VIEWS.includes(view) ? view : 'dashboard';
-}
-
-function monthLabel(period) {
-  const [year, month] = period.split('-').map(Number);
-  return new Date(year, month - 1, 1).toLocaleDateString('en-IN', {
-    month: 'long',
-    year: 'numeric',
-  });
-}
-
-function formatDate(value, short = false) {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    ...(short ? {} : { year: 'numeric' }),
-  });
-}
-
-function categoryById(id) {
-  return app.data?.categories.find((category) => category.id === id) ?? null;
-}
-
-function activeCategories() {
-  return app.data?.categories.filter((category) => !category.archived) ?? [];
-}
-
-function categoryType(category) {
-  if (
-    category.type === 'bill' ||
-    category.type === 'saving' ||
-    category.type === 'investment' ||
-    category.type === 'loan' ||
-    category.type === 'spending'
-  ) {
-    return category.type;
-  }
-  if (category.id === 'rent') return 'bill';
-  if (category.id === 'loan') return 'loan';
-  if (category.id === 'invest') return 'investment';
-  if (category.id === 'emergency') return 'saving';
-  if (category.kind === 'flex') return 'spending';
-  return category.rollover ? 'saving' : 'bill';
-}
-
-function acceptState(state) {
-  app.data = state;
-  app.lastStateJson = JSON.stringify(state);
-}
-
-async function api(path, { method = 'GET', body } = {}) {
-  const response = await fetch(path, {
-    method,
-    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  let data = null;
-  try {
-    data = await response.json();
-  } catch {
-    data = null;
-  }
-  if (!response.ok) {
-    const error = new Error(data?.error || `Request failed (${response.status}).`);
-    error.code = data?.code;
-    error.details = data?.details;
-    throw error;
+async function api(path, {method = 'GET', body} = {}) {
+  const sep = path.includes('?') ? '&' : '?';
+  const response = await fetch(`${path}${sep}period=${app.period}`, {method, headers: body === undefined ? {} : {'content-type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Could not save. Try again.');
+  if (data.state && (!data.state.derived?.safety || !data.state.derived?.fundingPreview)) {
+    throw new Error('Khaata’s server is running an older version. Restart it with npm start, then reload this page.');
   }
   return data;
 }
-
-async function load() {
-  const response = await api('/api/state');
-  acceptState(response.state);
-  render();
-}
-
-async function mutate(path, options) {
-  const response = await api(path, options);
-  if (response.state) {
-    acceptState(response.state);
-    render();
-  }
+async function refresh() { app.data = (await api('/api/state')).state; render(); }
+async function change(path, body, method = 'POST') {
+  const response = await api(path,{method,body});
+  if (response.state) app.data = response.state;
   return response;
 }
-
-function toast(message, tone = 'ok') {
-  const root = $('#toast-root');
-  if (!root) return;
-  const element = document.createElement('div');
-  element.className = `toast ${tone}`;
-  element.textContent = message;
-  root.append(element);
-  setTimeout(() => {
-    element.classList.add('out');
-    setTimeout(() => element.remove(), 260);
-  }, tone === 'error' ? 5600 : 3800);
+function toast(message, error = false) {
+  const node = document.createElement('div'); node.className = `toast ${error?'error':'ok'}`; node.textContent = message;
+  $('#toast-root').append(node); setTimeout(() => node.remove(), error?6500:3500);
 }
-
-function brandMarkup(compact = false) {
-  return `<div class="brand ${compact ? 'compact' : ''}">
-    <span class="logo-mark" aria-hidden="true">${LOGO}</span>
-    <div class="brand-text"><strong>Khaata</strong>${compact ? '' : '<span>Salary, divided.</span>'}</div>
-  </div>`;
+let previousFocus;
+function modal(title, body) {
+  previousFocus = document.activeElement; app.modal = true;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-head"><h2>${esc(title)}</h2><button class="icon-btn" type="button" data-action="close" aria-label="Close">×</button></div><div class="modal-body">${body}</div></section></div>`;
+  document.body.classList.add('modal-open');
+  setTimeout(() => ($('#modal-root .modal-body input:not([type=hidden]), #modal-root .modal-body select') || $('#modal-root button'))?.focus(), 0);
 }
-
-function navItem(view, label) {
-  return `<button class="nav-item ${app.view === view ? 'active' : ''}" data-action="nav" data-view="${view}">
-    ${ICONS[view]}<span>${label}</span>
-  </button>`;
-}
+function close() { app.modal = false; $('#modal-root').innerHTML = ''; document.body.classList.remove('modal-open'); previousFocus?.focus(); }
+const actions = (label='Save') => `<div class="modal-actions">${button('Cancel','close')}<button class="btn primary" type="submit">${label}</button></div>`;
 
 function setupView() {
-  return `<div class="setup">
-    <div class="setup-card">
-      ${brandMarkup()}
-      <p class="eyebrow" style="margin-top:34px">Start here</p>
-      <h1>Salary,<br /><em>divided.</em></h1>
-      <p class="lede">Your bank has one balance. This app puts labels on parts of it — bills first, then everyday spending. Leftovers for clothes and electronics carry forward.</p>
-      <form data-form="setup" autocomplete="off">
-        <label class="field">
-          <span>Monthly salary (take-home)</span>
-          <div class="money-input"><span>₹</span><input name="income" type="number" min="0" step="100" value="100000" inputmode="numeric" required /></div>
-        </label>
-        <label class="field">
-          <span>Money in your bank right now</span>
-          <div class="money-input"><span>₹</span><input name="balance" type="number" min="0" step="100" value="" placeholder="e.g. 52000" inputmode="numeric" required /></div>
-        </label>
-        <p class="hint">Use your real bank balance. The app starts from this balance, so only log money that moves after you start. If salary hasn't arrived yet, enter what's there now.</p>
-        <button class="btn primary wide" type="submit">Start</button>
-      </form>
-      <div class="setup-alt">
-        <button class="link-btn" type="button" data-action="demo-setup">See an example first →</button>
-      </div>
-      <p class="fine">Everything lives in <code>data/store.json</code> on this computer. No bank login, no cloud.</p>
-    </div>
-  </div>`;
+  return `<div class="setup"><div class="setup-card">${brand()}<p class="eyebrow">A little clarity for your money</p><h1>Make room<br>for what matters.</h1><p class="lede">Plan your salary. Spend with confidence.</p><form data-form="setup">${amountField('Expected monthly salary','income','')}${amountField('Bank balance now','balance','')}<label class="field"><span>Starting date</span><input name="openingDate" type="date" value="${today()}" max="${today()}" required></label><p class="fine">Only log new transactions after this balance.</p><button class="btn primary wide">Build my plan</button></form><div class="setup-alt">${button('Explore an example','demo','','ghost')}</div><p class="fine">Stored on this computer.</p></div></div>`;
 }
-
-function shellView() {
-  const derived = app.data.derived;
-  return `<div class="shell">
-    <aside class="sidebar">
-      ${brandMarkup()}
-      <nav class="nav" aria-label="Main">
-        ${navItem('dashboard', 'Home')}
-        ${navItem('plan', 'Plan')}
-        ${navItem('transactions', 'Transactions')}
-        ${navItem('settings', 'Settings')}
-        <button class="nav-item help-item" data-action="open-help">${ICONS.help}<span>How to use</span></button>
-      </nav>
-      <div class="sidebar-foot">
-        <div class="side-balance">
-          <span>In the bank</span>
-          <strong>${money(derived.bankBalancePaise)}</strong>
-          <small>${monthLabel(derived.period)}</small>
-        </div>
-        <p class="fine">Local only · no bank login</p>
-      </div>
-    </aside>
-
-    <main class="main">
-      <header class="mobile-head">
-        ${brandMarkup(true)}
-        <div class="mobile-actions">
-          <button class="icon-btn help-btn" data-action="open-help" aria-label="How to use">?</button>
-          <button class="btn primary small" data-action="open-tx">+ Spend</button>
-        </div>
-      </header>
-      <div class="view">${viewMarkup()}</div>
-    </main>
-
-    <nav class="bottom-nav" aria-label="Main">
-      ${navItem('dashboard', 'Home')}
-      ${navItem('plan', 'Plan')}
-      ${navItem('transactions', 'Activity')}
-      ${navItem('settings', 'Settings')}
-    </nav>
-  </div>`;
-}
-
-function viewMarkup() {
-  switch (app.view) {
-    case 'plan':
-      return planView();
-    case 'transactions':
-      return transactionsView();
-    case 'settings':
-      return settingsView();
-    default:
-      return dashboardView();
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Dashboard                                                          */
-/* ------------------------------------------------------------------ */
-
-function dashboardView() {
-  const derived = app.data.derived;
-  const targets = new Map(
-    derived.plan.items.map((item) => [item.categoryId, item.targetPaise])
-  );
-  const displayTargets = new Map(targets);
-  if (derived.allocation) {
-    for (const item of derived.allocation.items) {
-      if (item.reason === 'target') displayTargets.set(item.categoryId, item.targetPaise);
-    }
-  }
-  const categories = activeCategories();
-  const fixed = categories.filter((category) => category.kind === 'fixed');
-  const flexible = categories.filter((category) => category.kind === 'flex');
-  const summary = derived.summary;
-  const allocationItems = new Map(
-    (derived.allocation?.items || []).map((item) => [item.categoryId, item])
-  );
-  const commitments = new Map(
-    (derived.commitments || []).map((commitment) => [commitment.categoryId, commitment])
-  );
-  const countable = (derived.commitments || []).filter(
-    (commitment) =>
-      commitment.targetPaise > 0 &&
-      commitment.status !== 'not-in-division' &&
-      (!derived.allocation || commitment.inDivision)
-  );
-  const doneCount = countable.filter((commitment) => commitment.status === 'done').length;
-  const fixedSubtitle =
-    countable.length > 0
-      ? `Bills, savings, investments, loans · ${doneCount} of ${countable.length} done this month.`
-      : 'Bills, savings, investments, loans. Not everyday spending.';
-
-  const notice = allocationNotice(derived);
-
-  return `<section class="hero">
-    <div class="hero-glow" aria-hidden="true"></div>
-    <div class="hero-main">
-      <p class="eyebrow light">Money in your bank · ${monthLabel(derived.period)}</p>
-      <h1 class="balance">${money(derived.bankBalancePaise)}</h1>
-      <p class="hero-sub">${money(derived.allocatedPaise)} is divided into ${categories.length} buckets${
-        derived.unallocatedPaise !== 0
-          ? ` · <span class="${derived.unallocatedPaise < 0 ? 'hero-neg' : ''}">${money(
-              derived.unallocatedPaise
-            )} not divided yet</span>`
-          : ''
-      }</p>
-    </div>
-    <div class="hero-actions">
-      <button class="btn primary light" data-action="open-tx">Add expense</button>
-      <button class="btn hero-ghost" data-action="open-tx" data-kind="income">Add income</button>
-      <button class="btn hero-ghost" data-action="open-move">Move money</button>
-      <button class="btn hero-ghost" data-action="open-reconcile">Check balance</button>
-    </div>
-  </section>
-
-  ${notice}
-
-  <div class="stats">
-    ${statCard('Spent this month', money(summary.spentPaise), `${summary.transactionCount} money movement${summary.transactionCount === 1 ? '' : 's'}`)}
-    ${statCard(
-      summary.investedPaise < 0 ? 'Came back' : 'Moved out',
-      money(Math.abs(summary.investedPaise)),
-      summary.investedPaise < 0
-        ? 'Withdrawals were more than new moves'
-        : 'Savings, investments, loans',
-      summary.investedPaise < 0 ? 'warm' : ''
-    )}
-    ${statCard(
-      'Not divided',
-      money(derived.unallocatedPaise),
-      derived.allocation ? 'Money without a bucket' : 'Waiting to be divided',
-      derived.unallocatedPaise < 0 ? 'negative' : derived.unallocatedPaise > 0 ? 'warm' : ''
-    )}
-  </div>
-
-  ${envelopeSection('Fixed first', fixedSubtitle, fixed, targets, summary, commitments)}
-  ${investmentPanel(derived.investments)}
-  ${envelopeSection('Spending', 'These split what is left, by percentage.', flexible, displayTargets, summary, null, allocationItems)}
-
-  <section class="panel recents">
-    <div class="panel-head">
-      <div><h2>Recent transactions</h2><p>Your latest money movements.</p></div>
-      <button class="link-btn" data-action="nav" data-view="transactions">View all →</button>
-    </div>
-    ${txList(app.data.transactions.slice(0, 6), 'No transactions yet. Add your first one.')}
-  </section>`;
-}
-
-function statCard(label, value, sub, tone = '') {
-  return `<div class="stat ${tone}"><span>${label}</span><strong>${value}</strong><small>${sub}</small></div>`;
-}
-
-function envelopeSection(title, subtitle, categories, targets, summary, commitments, allocationItems = null) {
-  if (categories.length === 0) return '';
-  return `<section class="section">
-    <div class="section-head">
-      <div><h2>${title}</h2><p>${subtitle}</p></div>
-      <button class="link-btn" data-action="nav" data-view="plan">Edit plan →</button>
-    </div>
-    <div class="env-grid">
-      ${categories
-        .map((category) => {
-          const commitment = commitments?.get(category.id) ?? null;
-          return envelopeCard(
-            category,
-            commitment ? commitment.targetPaise : targets.get(category.id) ?? 0,
-            summary.spentByCategory[category.id] ?? 0,
-            summary.transferredByCategory?.[category.id] ?? 0,
-            commitment,
-            allocationItems?.get(category.id) ?? null
-          );
-        })
-        .join('')}
-    </div>
-  </section>`;
-}
-
-function investmentPanel(investments) {
-  if (!investments || investments.length === 0) return '';
-  return `<section class="panel invest-panel">
-    <div class="panel-head">
-      <div><h2>Your investments</h2><p>Money put in, money taken out, and what it is worth now.</p></div>
-    </div>
-    <div class="invest-list">
-      ${investments
-        .map((investment) => {
-          const gain = investment.gainPaise;
-          const gainClass =
-            gain === null
-              ? investment.worthStale
-                ? 'warn'
-                : ''
-              : gain > 0
-                ? 'positive'
-                : gain < 0
-                  ? 'negative'
-                  : '';
-          const gainText =
-            gain === null
-              ? investment.worthPaise === null
-                ? '—'
-                : !investment.hasCostBasis
-                  ? 'No history'
-                  : investment.worthStale
-                    ? 'Update worth'
-                    : '—'
-              : `${gain > 0 ? '+' : ''}${money(gain)}`;
-          return `<div class="invest-row">
-            <div class="invest-name">
-              <span class="env-icon sm" style="background:${esc(investment.color || '#8a8376')}1f">${esc(
-                investment.icon || '📈'
-              )}</span>
-              <strong>${esc(investment.name)}</strong>
-            </div>
-            <div class="invest-stat"><span>Put in</span><strong>${money(
-              investment.putInPaise
-            )}</strong></div>
-            <div class="invest-stat"><span>Took out</span><strong>${money(
-              investment.tookOutPaise
-            )}</strong></div>
-            <div class="invest-stat"><span>Worth now</span><strong>${
-              investment.worthPaise === null ? 'Not set' : money(investment.worthPaise)
-            }</strong></div>
-            <div class="invest-stat"><span>Gain / loss</span><strong class="${gainClass}">${gainText}</strong></div>
-            <button class="mini-btn" data-action="update-investment-value" data-id="${esc(
-              investment.categoryId
-            )}">${investment.worthPaise === null ? 'Set worth' : 'Update worth'}</button>
-          </div>`;
-        })
-        .join('')}
-    </div>
-    <p class="fine">Worth now is entered by you. The bucket balance is cash in your bank, not the investment's value.</p>
-    <p class="fine">Gain = worth now + took out − put in. It needs at least one Moved out entry. After you move money, update Worth now — the gain stays hidden until you do.</p>
-  </section>`;
-}
-
-function commitmentStatusHtml(commitment) {
-  if (!commitment) return '';
-  const type = commitment.type;
-  const verb = type === 'saving' ? 'saved' : type === 'investment' ? 'invested' : 'paid';
-  const dueVerb = type === 'saving' ? 'to save' : type === 'investment' ? 'to invest' : 'due';
-
-  if (commitment.status === 'done') {
-    const label = type === 'saving' ? 'Saved' : type === 'investment' ? 'Invested' : 'Paid';
-    return `<div class="env-commit done">✓ ${label} this month${
-      commitment.afterDivision ? ' · added after division' : ''
-    }${commitment.extraPaise > 0 ? ` · ${money(commitment.extraPaise)} extra` : ''}</div>`;
-  }
-  if (commitment.status === 'partial') {
-    return `<div class="env-commit partial">${money(commitment.paidPaise)} of ${money(
-      commitment.targetPaise
-    )} ${verb}</div>`;
-  }
-  if (commitment.status === 'due') {
-    return `<div class="env-commit due">${money(commitment.targetPaise)} ${dueVerb}</div>`;
-  }
-  if (commitment.status === 'refunded') {
-    return `<div class="env-commit refunded">Refunded — not done</div>`;
-  }
-  if (commitment.status === 'not-in-division') {
-    return `<div class="env-commit muted">Added after this month's division${
-      commitment.paidPaise > 0 ? ` · ${money(commitment.paidPaise)} moved` : ''
-    }</div>`;
-  }
-  if (commitment.status === 'no-target') {
-    return `<div class="env-commit muted">No amount set</div>`;
-  }
-  return '';
-}
-
-function envelopeCard(category, target, spent, moved, commitment, allocationItem = null) {
-  const balance = category.balancePaise;
-  const ratio =
-    target > 0
-      ? Math.max(0, Math.min(1, balance / target))
-      : balance > 0
-        ? 1
-        : 0;
-  const over = balance < 0;
-  const type = categoryType(category);
-  const tag =
-    type === 'bill' ? 'Bill' : type === 'saving' ? 'Saving' : type === 'investment' ? 'Invest' : type === 'loan' ? 'Loan' : '';
-  const action =
-    type === 'saving' ? 'Save' : type === 'investment' ? 'Invest' : type === 'loan' ? 'Pay' : 'Spend';
-  const actionKind = type === 'saving' || type === 'investment' || type === 'loan' ? 'transfer' : 'expense';
-  const movedLabel =
-    type === 'saving' ? 'moved out' : type === 'investment' ? 'invested' : type === 'loan' ? 'paid' : 'moved';
-  const idleLabel =
-    type === 'bill'
-      ? 'No payment yet'
-      : type === 'loan'
-        ? 'Nothing paid yet'
-        : type === 'investment'
-          ? 'Nothing invested yet'
-          : type === 'saving'
-            ? 'Still in the bucket'
-            : 'No spending yet';
-  const overLabel =
-    type === 'investment' ? 'cash to invest' : type === 'loan' ? 'paid extra' : 'saved up';
-  const done = commitment?.status === 'done';
-  const actionTitle = done
-    ? type === 'bill'
-      ? 'Add another payment'
-      : type === 'saving'
-        ? 'Add another transfer'
-        : type === 'investment'
-          ? 'Add another investment'
-          : 'Add another loan payment'
-    : `${action} with ${category.name}`;
-  const statusHtml = commitmentStatusHtml(commitment);
-  const carryPaise =
-    type === 'spending' && Number.isSafeInteger(allocationItem?.carryPaise)
-      ? allocationItem.carryPaise
-      : 0;
-  const carryHtml =
-    carryPaise < 0
-      ? `<div class="env-carry">Started ${money(-carryPaise)} lower · carried overspend</div>`
-      : carryPaise > 0
-        ? `<div class="env-carry positive">${money(carryPaise)} carried from last month</div>`
-        : '';
-  const rollMeta = category.rollover
-    ? category.capPaise !== null && category.capPaise !== undefined
-      ? `Leftover stays · max ${money(category.capPaise)}`
-      : 'Leftover stays'
-    : 'Resets next month';
-
-  return `<article class="env-card ${over ? 'is-over' : ''} ${done ? 'is-done' : ''}" style="--accent:${esc(category.color)}">
-    <div class="env-head">
-      <span class="env-icon" style="background:${esc(category.color)}1f">${esc(category.icon)}</span>
-      <div class="env-title"><h3>${esc(category.name)}${
-        tag ? ` <span class="env-tag ${type}">${tag}</span>` : ''
-      }</h3><span>${rollMeta}</span></div>
-      <button class="icon-btn add" data-action="open-tx" data-category="${esc(category.id)}" data-kind="${actionKind}" title="${esc(actionTitle)}" aria-label="${esc(actionTitle)}">+</button>
-    </div>
-    <div class="env-amount">${money(balance)}</div>
-    <div class="env-target">of ${target > 0 ? money(target) : 'no target'} ${
-      category.rollover && balance > target && target > 0 ? `· ${overLabel}` : ''
-    }</div>
-    ${statusHtml}
-    ${carryHtml}
-    <div class="bar"><span style="width:${(ratio * 100).toFixed(1)}%;background:${esc(category.color)}"></span></div>
-    <div class="env-foot">
-      <span>${
-        moved > 0
-          ? `${money(moved)} ${movedLabel}`
-          : moved < 0
-            ? `${money(-moved)} came back`
-            : spent > 0
-              ? `Spent ${money(spent)}`
-              : idleLabel
-      }</span>
-      ${
-        over
-          ? `<button class="link-btn danger" data-action="open-move" data-to="${esc(category.id)}">${
-              type === 'spending' ? 'Cover overspend' : 'Cover shortage'
-            }</button>`
-          : ''
-      }
-    </div>
-  </article>`;
-}
-
-function allocationNotice(derived) {
-  const unallocated = derived.unallocatedPaise;
-
-  if (unallocated < 0) {
-    return `<div class="notice danger">
-      <div class="notice-copy"><strong>Your buckets are short by ${money(-unallocated)}.</strong><span>Take money out of a bucket, or record the missing expense.</span></div>
-      <div class="notice-actions"><button class="btn ghost" data-action="open-move">Fix shortage</button></div>
-    </div>`;
-  }
-
-  if (!derived.allocation && unallocated > 0) {
-    return `<div class="notice warn">
-      <div class="notice-copy"><strong>${money(unallocated)} is ready to divide.</strong><span>Press once to put this month's money into your buckets.</span></div>
-      <div class="notice-actions"><button class="btn primary" data-action="open-allocate">Divide this month's salary</button></div>
-    </div>`;
-  }
-
-  if (!derived.allocation && unallocated === 0) {
-    return `<div class="notice quiet">
-      <div class="notice-copy"><strong>No money to divide yet.</strong><span>When your salary lands, add it here and divide it.</span></div>
-      <div class="notice-actions"><button class="btn ghost" data-action="open-tx" data-kind="income">Add income</button></div>
-    </div>`;
-  }
-
-  if (derived.allocation && unallocated > 0) {
-    return `<div class="notice warn">
-      <div class="notice-copy"><strong>${money(unallocated)} is not in a bucket yet.</strong><span>This month is already divided. Move the extra into a bucket.</span></div>
-      <div class="notice-actions"><button class="btn ghost" data-action="open-move">Move money</button></div>
-    </div>`;
-  }
-
-  return '';
-}
-
-function txList(transactions, emptyMessage) {
-  if (!transactions || transactions.length === 0) {
-    return `<div class="empty"><span>◎</span><p>${esc(emptyMessage)}</p></div>`;
-  }
-  return `<div class="tx-list" id="tx-list">${transactions.map(txRow).join('')}</div>`;
-}
-
-function txRow(transaction) {
-  const category = categoryById(transaction.categoryId);
-  const incoming = transaction.direction === 'in';
-  const icon =
-    category?.icon ||
-    (transaction.kind === 'income'
-      ? '💵'
-      : transaction.kind === 'adjustment'
-        ? '⚖️'
-        : transaction.kind === 'transfer'
-          ? '📈'
-          : '💸');
-  const colour = category?.color || '#8a8376';
-  const label = category?.name || kindLabel(transaction.kind);
-  const search = `${transaction.description} ${label} ${transaction.notes || ''}`.toLowerCase();
-
-  return `<button class="tx-row" data-action="edit-tx" data-id="${esc(transaction.id)}" data-kind="${esc(
-    transaction.kind
-  )}" data-search="${esc(search)}">
-    <span class="tx-date">${formatDate(transaction.date, true)}</span>
-    <span class="tx-icon" style="background:${esc(colour)}1f">${esc(icon)}</span>
-    <span class="tx-main">
-      <strong>${esc(transaction.description)}</strong>
-      <span>${esc(label)}${transaction.source === 'alert' ? ' · auto' : ''}</span>
-    </span>
-    <span class="tx-amount ${incoming ? 'in' : ''}">${incoming ? '+' : '−'}${money(transaction.amountPaise)}</span>
-  </button>`;
-}
-
-function kindLabel(kind) {
-  return (
-    {
-      expense: 'Spending',
-      income: 'Money in',
-      transfer: 'Transfer',
-      adjustment: 'Balance fix',
-    }[kind] || kind
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Plan                                                               */
-/* ------------------------------------------------------------------ */
-
-function planView() {
-  const derived = app.data.derived;
-  const targets = new Map(
-    derived.plan.items.map((item) => [item.categoryId, item.targetPaise])
-  );
-  const categories = activeCategories();
-  const bills = categories.filter((category) => categoryType(category) === 'bill');
-  const savings = categories.filter((category) => categoryType(category) === 'saving');
-  const investments = categories.filter((category) => categoryType(category) === 'investment');
-  const loans = categories.filter((category) => categoryType(category) === 'loan');
-  const spending = categories.filter((category) => categoryType(category) === 'spending');
-  const allocation = derived.allocation;
-  const canDivide = derived.unallocatedPaise > 0;
-  const settings = app.data.settings;
-  const surplusCandidates = [
-    ...categories.filter((category) => categoryType(category) === 'saving'),
-    ...categories.filter((category) => categoryType(category) === 'investment'),
-    ...categories.filter((category) => categoryType(category) === 'loan'),
-  ];
-  const surplusOptions = (surplusCandidates.length ? surplusCandidates : categories)
-    .map(
-      (category) =>
-        `<option value="${esc(category.id)}" ${
-          category.id === settings.surplusCategoryId ? 'selected' : ''
-        }>${esc(category.name)}${category.rollover ? '' : ' (starts fresh)'}</option>`
-    )
-    .join('');
-
-  return `<div class="page-head">
-    <div>
-      <p class="eyebrow">Your monthly plan</p>
-      <h1>Monthly plan</h1>
-      <p class="lede">Set this once. Bills, savings, investments and loans come first, then the rest is split across spending buckets by percentage.</p>
-    </div>
-    <button class="btn ghost" data-action="nav" data-view="dashboard">Back to home</button>
-  </div>
-
-  <div class="status-card ${allocation ? 'ok' : 'warn'}">
-    <div>
-      <strong>${allocation ? `${monthLabel(derived.period)} is divided` : `${monthLabel(derived.period)} is not divided yet`}</strong>
-      <span>${
-        allocation
-          ? `Divided ${money(allocation.fundedPaise)} · ${money(allocation.surplusPaise)} extra went to ${esc(
-              categoryById(settings.surplusCategoryId)?.name || 'Emergency'
-            )}`
-          : canDivide
-            ? 'Divide this month\'s money into your buckets.'
-            : 'Add your salary on Home first. Then divide it.'
-      }</span>
-    </div>
-    ${
-      allocation
-        ? allocation.canUndo
-          ? `<button class="btn ghost" data-action="undo-allocation">Undo division</button>`
-          : `<span class="status-note">Spending recorded. Use Move money to adjust your buckets.</span>`
-        : canDivide
-          ? `<button class="btn primary" data-action="open-allocate">Divide now</button>`
-          : `<button class="btn ghost" data-action="nav" data-view="dashboard">Go home</button>`
-    }
-  </div>
-
-  <form id="plan-form" data-form="plan" autocomplete="off">
-    <div class="plan-controls">
-      <label class="field">
-        <span>Monthly salary (take-home)</span>
-        <div class="money-input"><span>₹</span><input name="income" type="number" min="0" step="100" value="${rupeesInput(
-          settings.monthlyIncomePaise
-        )}" inputmode="numeric" /></div>
-      </label>
-      <label class="field">
-        <span>Salary date</span>
-        <input name="payday" type="number" min="1" max="28" value="${settings.paydayDay}" />
-      </label>
-      <label class="field">
-        <span>Extra money goes to</span>
-        <select name="surplus">${surplusOptions}</select>
-      </label>
-    </div>
-
-    <div class="plan-summary" id="plan-summary"></div>
-
-    ${planSection('fixed', 'bill', 'Bills', 'Rent and utilities. Same amount every month.', bills, targets)}
-    ${planSection('fixed', 'saving', 'Savings', 'Emergency and other savings. Leftovers stay.', savings, targets)}
-    ${planSection('fixed', 'investment', 'Investments', 'SIPs, PPF, stocks. Leftovers stay.', investments, targets)}
-    ${planSection('fixed', 'loan', 'Loans', 'EMIs. Same amount every month.', loans, targets)}
-    ${planSection('flex', 'spending', 'Spending buckets', 'Split what is left, by percentage.', spending, targets)}
-
-    <p class="plan-note">Changing the plan only affects next month. It does not move this month's money.</p>
-
-    <div class="savebar" id="savebar" hidden>
-      <div><strong>Unsaved changes</strong><span>Takes effect next month.</span></div>
-      <div class="savebar-actions">
-        <button type="button" class="btn ghost" data-action="discard-plan">Discard</button>
-        <button type="submit" class="btn primary" id="save-plan-btn">Save plan</button>
-      </div>
-    </div>
-  </form>`;
-}
-
-function planSection(kind, type, title, subtitle, categories, targets) {
-  const addLabel =
-    {
-      bill: 'bill',
-      saving: 'saving',
-      investment: 'investment',
-      loan: 'loan',
-      spending: 'bucket',
-    }[type] || 'bucket';
-
-  return `<section class="plan-section">
-    <div class="plan-section-head">
-      <div><h2>${title}</h2><span>${subtitle}</span></div>
-      <button type="button" class="link-btn" data-action="add-row" data-kind="${kind}" data-type="${type}">+ Add ${addLabel}</button>
-    </div>
-    <div class="plan-table" data-kind="${kind}" data-type="${type}">
-      <div class="plan-head">
-        <span>Bucket</span><span>${kind === 'fixed' ? 'Amount' : 'Share'}</span><span>Gets</span><span>Keep</span><span>Max</span><span></span>
-      </div>
-      <div class="plan-rows">
-        ${
-          categories.length === 0
-            ? `<div class="plan-empty">No ${title.toLowerCase()} yet. Use “+ Add ${addLabel}” to create one.</div>`
-            : categories
-                .map((category) => planRow(category, targets.get(category.id) ?? 0))
-                .join('')
-        }
-      </div>
-    </div>
-  </section>`;
-}
-
-function planRow(category, target) {
-  const isFixed = category.kind === 'fixed';
-  const color = category.color || PALETTE[0];
-  return `<div class="plan-row" data-cat="${esc(category.id || '')}" data-kind="${esc(
-    category.kind
-  )}" data-type="${esc(categoryType(category))}" data-icon="${esc(category.icon || '🏷️')}" data-color="${esc(color)}" data-balance="${
-    category.balancePaise || 0
-  }">
-    <div class="plan-name">
-      <button type="button" class="env-icon sm" style="background:${esc(color)}1f" data-action="cycle-icon" title="Change icon">${esc(
-        category.icon || '🏷️'
-      )}</button>
-      <input name="name" value="${esc(category.name || '')}" placeholder="Bucket name" maxlength="40" aria-label="Bucket name" />
-    </div>
-    <div class="plan-input">
-      ${
-        isFixed
-          ? `<span class="affix">₹</span><input name="target" type="number" min="0" step="100" value="${rupeesInput(
-              category.targetPaise
-            )}" aria-label="Monthly amount" />`
-          : `<input name="percent" type="number" min="0" max="100" step="0.5" value="${formatPercent(
-              category.percent
-            )}" aria-label="Percentage of spending money" /><span class="affix">%</span>`
-      }
-    </div>
-    <div class="plan-target" data-target>${isFixed ? '<span class="muted">same</span>' : money(target)}</div>
-    <label class="check" title="Keep leftover money for next month"><input type="checkbox" name="rollover" ${
-      category.rollover ? 'checked' : ''
-    } /><span>Keep</span></label>
-    <div class="plan-input cap">
-      <span class="affix">₹</span><input name="cap" type="number" min="0" step="100" value="${
-        category.capPaise !== null && category.capPaise !== undefined
-          ? rupeesInput(category.capPaise)
-          : ''
-      }" placeholder="No max" aria-label="Maximum balance" />
-    </div>
-    <button type="button" class="icon-btn danger" data-action="remove-row" ${
-      category.balancePaise !== 0 ? 'disabled title="Move the balance out first"' : ''
-    } aria-label="Remove ${esc(category.name || 'bucket')}">×</button>
-  </div>`;
-}
-
-function updatePlanPreview() {
-  const form = $('#plan-form');
-  if (!form) return;
-
-  const income = toPaise(form.elements.income.value);
-  const rows = $$('.plan-row', form);
-  const fixedRows = rows.filter((row) => row.dataset.kind === 'fixed');
-  const flexRows = rows.filter((row) => row.dataset.kind === 'flex');
-
-  const fixedTotal = fixedRows.reduce(
-    (sum, row) => sum + toPaise(row.querySelector('[name="target"]').value),
-    0
-  );
-  const percentTotal =
-    Math.round(
-      flexRows.reduce(
-        (sum, row) => sum + (Number(row.querySelector('[name="percent"]').value) || 0),
-        0
-      ) * 100
-    ) / 100;
-  const pool = Math.max(0, income - fixedTotal);
-
-  let flexTotal = 0;
-  for (const row of flexRows) {
-    const percent = Number(row.querySelector('[name="percent"]').value) || 0;
-    const target = Math.round((pool * percent) / 100);
-    flexTotal += target;
-    const targetNode = row.querySelector('[data-target]');
-    if (targetNode) targetNode.textContent = money(target);
-  }
-
-  const planned = fixedTotal + flexTotal;
-  const unplanned = income - planned;
-  const percentOk = flexRows.length === 0 || Math.abs(percentTotal - 100) < 0.01;
-  const incomeOk = income > 0;
-  const overIncome = fixedTotal > income;
-  const summary = $('#plan-summary');
-
-  if (summary) {
-    const fixedWidth = income > 0 ? Math.min(100, (fixedTotal / income) * 100) : 0;
-    const flexWidth = income > 0 ? Math.min(100 - fixedWidth, (flexTotal / income) * 100) : 0;
-    const statusClass = percentOk && !overIncome && incomeOk ? 'ok' : 'bad';
-    const statusText = !incomeOk
-      ? 'Enter your monthly salary.'
-      : overIncome
-        ? `Your bills are ${money(fixedTotal - income)} more than your salary.`
-        : !percentOk
-          ? `Your spending percentages add up to ${formatPercent(percentTotal)}%. They need to equal 100%.`
-          : `Fixed ${money(fixedTotal)} + spending ${money(flexTotal)} = ${money(planned)}. ${
-              unplanned === 0 ? 'Every rupee is planned.' : `${money(unplanned)} is not planned.`
-            }`;
-
-    summary.innerHTML = `<div class="alloc-bar" aria-hidden="true">
-      <span style="width:${fixedWidth}%;background:#b4643c"></span>
-      <span style="width:${flexWidth}%;background:#23735f"></span>
-    </div>
-    <div class="alloc-legend">
-      <span><i style="background:#b4643c"></i>Fixed ${money(fixedTotal)}</span>
-      <span><i style="background:#23735f"></i>Spending ${money(flexTotal)}</span>
-      <span><i class="unplanned"></i>Not planned ${money(Math.max(0, unplanned))}</span>
-    </div>
-    <div class="alloc-status ${statusClass}">${statusText}</div>`;
-  }
-
-  const saveButton = $('#save-plan-btn');
-  if (saveButton) saveButton.disabled = !(percentOk && !overIncome && incomeOk);
-}
-
-function markPlanDirty() {
-  app.planDirty = true;
-  const bar = $('#savebar');
-  if (bar) bar.hidden = false;
-}
-
-function addPlanRow(kind, type) {
-  const form = $('#plan-form');
-  if (!form) return;
-  const container = form.querySelector(
-    `.plan-table[data-kind="${kind}"][data-type="${type}"] .plan-rows`
-  );
-  if (!container) return;
-  const count = $$('.plan-row', form).length;
-  const category = {
-    id: '',
-    name: '',
-    kind,
-    type,
-    targetPaise: 0,
-    percent: 0,
-    rollover: type === 'saving' || type === 'investment',
-    capPaise: null,
-    icon: '🏷️',
-    color: PALETTE[count % PALETTE.length],
-    balancePaise: 0,
-  };
-  container.querySelector('.plan-empty')?.remove();
-  container.insertAdjacentHTML('beforeend', planRow(category, 0));
-  markPlanDirty();
-  updatePlanPreview();
-  const rows = $$('.plan-row', container);
-  rows[rows.length - 1]?.querySelector('[name="name"]')?.focus();
-}
-
-function removePlanRow(button) {
-  const row = button.closest('.plan-row');
-  if (!row) return;
-  if (Number(row.dataset.balance) !== 0) {
-    toast('Move the money out of this bucket before removing it.', 'error');
-    return;
-  }
-  row.remove();
-  markPlanDirty();
-  updatePlanPreview();
-}
-
-function collectPlan() {
-  const form = $('#plan-form');
-  const rows = $$('.plan-row', form);
-  return {
-    monthlyIncomePaise: toPaise(form.elements.income.value),
-    paydayDay: Number(form.elements.payday.value),
-    surplusCategoryId: form.elements.surplus.value || null,
-    categories: rows.map((row) => {
-      const kind = row.dataset.kind;
-      const capValue = row.querySelector('[name="cap"]').value;
-      return {
-        id: row.dataset.cat || undefined,
-        kind,
-        type: row.dataset.type,
-        name: row.querySelector('[name="name"]').value.trim(),
-        targetPaise: kind === 'fixed' ? toPaise(row.querySelector('[name="target"]').value) : 0,
-        percent: kind === 'flex' ? Number(row.querySelector('[name="percent"]').value) || 0 : 0,
-        rollover: row.querySelector('[name="rollover"]').checked,
-        capPaise: capValue === '' ? null : toPaise(capValue),
-        icon: row.dataset.icon,
-        color: row.dataset.color,
-      };
-    }),
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/* Transactions                                                       */
-/* ------------------------------------------------------------------ */
-
-function transactionsView() {
-  const transactions = app.data.transactions;
-  const filters = [
-    ['all', 'All'],
-    ['expense', 'Spending'],
-    ['income', 'Money in'],
-    ['transfer', 'Transfers'],
-  ];
-
-  return `<div class="page-head">
-    <div>
-      <p class="eyebrow">History</p>
-      <h1>Transactions</h1>
-      <p class="lede">Everything that moved in or out of your bank, and which bucket it belongs to.</p>
-    </div>
-    <button class="btn primary" data-action="open-tx">Add transaction</button>
-  </div>
-
-  <div class="filters">
-    <div class="seg small" id="tx-filters">
-      ${filters
-        .map(
-          ([value, label]) =>
-            `<button type="button" class="${app.txKind === value ? 'active' : ''}" data-action="tx-filter" data-kind="${value}">${label}</button>`
-        )
-        .join('')}
-    </div>
-    <input id="tx-search" type="search" placeholder="Search description or bucket" value="${esc(
-      app.txSearch
-    )}" />
-  </div>
-
-  <div class="tx-meta"><span id="tx-count"></span></div>
-
-  ${
-    transactions.length === 0
-      ? `<div class="empty large"><span>◎</span><p>No transactions yet.</p><small>Add your first one to get started.</small></div>`
-      : `<div class="panel tx-panel">${txList(
-          transactions,
-          ''
-        )}<div class="empty" id="tx-empty" hidden><span>◎</span><p>Nothing matches that filter.</p></div></div>`
-  }`;
-}
-
-function applyTxFilter() {
-  const rows = $$('#tx-list .tx-row');
-  const query = app.txSearch.trim().toLowerCase();
-  let visible = 0;
-
-  for (const row of rows) {
-    const kindOk = app.txKind === 'all' || row.dataset.kind === app.txKind;
-    const searchOk = !query || row.dataset.search.includes(query);
-    const show = kindOk && searchOk;
-    row.hidden = !show;
-    if (show) visible += 1;
-  }
-
-  const count = $('#tx-count');
-  if (count) {
-    count.textContent = `${visible} transaction${visible === 1 ? '' : 's'}`;
-  }
-  const empty = $('#tx-empty');
-  if (empty) empty.hidden = visible > 0;
-  for (const button of $$('#tx-filters [data-action="tx-filter"]')) {
-    button.classList.toggle('active', button.dataset.kind === app.txKind);
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Settings                                                           */
-/* ------------------------------------------------------------------ */
-
-function settingsView() {
-  const settings = app.data.settings;
-  const derived = app.data.derived;
-  const targets = new Map(
-    derived.plan.items.map((item) => [item.categoryId, item.targetPaise])
-  );
-  const totalFor = (type) =>
-    activeCategories()
-      .filter((category) => categoryType(category) === type)
-      .reduce((sum, category) => sum + (targets.get(category.id) ?? 0), 0);
-  const billsTotal = totalFor('bill');
-  const savingsTotal = totalFor('saving');
-  const investmentsTotal = totalFor('investment');
-  const loansTotal = totalFor('loan');
-  const endpoint = `${location.origin}/api/ingest`;
-  const token = settings.ingestToken;
-  const curl = `curl -s -X POST ${endpoint} \\
-  -H 'content-type: application/json' \\
-  -H 'x-ingest-token: ${token}' \\
-  -d '{"amount":450.50,"direction":"out","description":"Swiggy","balance":52187.50}'`;
-
-  return `<div class="page-head">
-    <div>
-      <p class="eyebrow">Settings</p>
-      <h1>Settings</h1>
-      <p class="lede">Your plan, your data, and optional automation.</p>
-    </div>
-    <button class="btn ghost" data-action="open-help">How to use</button>
-  </div>
-
-  <div class="settings-grid">
-    <section class="panel">
-      <div class="panel-head"><div><h2>Your plan</h2><p>What each salary follows.</p></div></div>
-      <dl class="kv">
-        ${kv('Salary', money(settings.monthlyIncomePaise))}
-        ${kv('Salary date', `Day ${settings.paydayDay}`)}
-        ${kv('Bills', money(billsTotal))}
-        ${kv('Savings', money(savingsTotal))}
-        ${kv('Investments', money(investmentsTotal))}
-        ${kv('Loans', money(loansTotal))}
-        ${kv('Spending money', money(derived.plan.flexPoolPaise))}
-        ${kv('Extra goes to', esc(categoryById(settings.surplusCategoryId)?.name || 'Not set'))}
-      </dl>
-      <button class="btn ghost wide" data-action="nav" data-view="plan">Edit plan</button>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head"><div><h2>Bank balance</h2><p>What the app currently thinks.</p></div></div>
-      <p class="big-money">${money(derived.bankBalancePaise)}</p>
-      <p class="hint">${money(derived.allocatedPaise)} is in buckets. ${money(
-        derived.unallocatedPaise
-      )} is not divided.</p>
-      <button class="btn ghost wide" data-action="open-reconcile">Check bank balance</button>
-    </section>
-
-    <section class="panel wide">
-      <div class="panel-head"><div><h2>Optional: automatic updates</h2><p>For later, when you want bank alerts to fill the app for you.</p></div></div>
-      <details class="advanced">
-        <summary>Set up bank alerts</summary>
-        <p class="hint">Works with iPhone Shortcuts, Android Tasker/MacroDroid, or any script that can send JSON. If the alert includes your available balance, the app matches itself to it.</p>
-
-        <div class="code-line">
-          <span class="code-label">Endpoint</span>
-          <code>${esc(endpoint)}</code>
-          <button class="mini-btn" data-action="copy" data-copy="endpoint">Copy</button>
-        </div>
-        <div class="code-line">
-          <span class="code-label">Token</span>
-          <code class="token">${esc(token)}</code>
-          <button class="mini-btn" data-action="copy" data-copy="token">Copy</button>
-        </div>
-        <div class="code-line">
-          <span class="code-label">Rotate</span>
-          <span class="hint inline">If the token leaks, replace it. Old automations will stop working.</span>
-          <button class="mini-btn" data-action="rotate-token">New token</button>
-        </div>
-
-        <pre class="snippet"><code>${esc(curl)}</code></pre>
-
-        <details class="how">
-          <summary>How to automate it</summary>
-          <p><strong>iPhone:</strong> Shortcuts → Automation → when you receive an SMS or email from your bank → Get Text → Get Contents of URL → POST the endpoint above with the token header and a JSON body.</p>
-          <p><strong>Android:</strong> Tasker or MacroDroid → notification received from your bank/UPI app → HTTP POST the same JSON. The notification listener is the closest thing to instant updates.</p>
-          <p><strong>Security:</strong> the server listens on <code>127.0.0.1</code> by default. To reach it from your phone, run with <code>HOST=0.0.0.0 npm start</code> and use your Mac's LAN address. Keep the token private; it can write to your data.</p>
-        </details>
-      </details>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head"><div><h2>Backup</h2><p>Download a copy of everything.</p></div></div>
-      <p class="hint">Everything is in <code>data/store.json</code>, with the previous version in <code>data/store.json.bak</code>.</p>
-      <a class="btn ghost wide" href="/api/export" download>Download backup</a>
-      <label class="btn ghost wide file-btn">Restore backup
-        <input type="file" id="restore-file" accept="application/json,.json" hidden />
-      </label>
-      <p class="hint">Restoring replaces everything currently in the app.</p>
-    </section>
-
-    <section class="panel danger-zone">
-      <div class="panel-head"><div><h2>Reset</h2><p>These replace your current data.</p></div></div>
-      <button class="btn ghost wide" data-action="load-demo">Load demo data</button>
-      <button class="btn danger wide" data-action="reset-all">Start over</button>
-    </section>
-  </div>`;
-}
-
-function kv(label, value) {
-  return `<div><dt>${label}</dt><dd>${value}</dd></div>`;
-}
-
-/* ------------------------------------------------------------------ */
-/* Modal plumbing                                                     */
-/* ------------------------------------------------------------------ */
-
-function modalShell({ title, subtitle = '', body, footer = '' }) {
-  return `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-    <div class="modal-head">
-      <div><h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div>
-      <button class="icon-btn" data-action="close-modal" aria-label="Close">×</button>
-    </div>
-    <div class="modal-body">${body}</div>
-    ${footer ? `<div class="modal-foot">${footer}</div>` : ''}
-  </div>`;
-}
-
-function openModal(innerHtml, focusSelector = '#modal-root input:not([type="hidden"]), #modal-root select, #modal-root textarea') {
-  app.modalOpen = true;
-  $('#modal-root').innerHTML = `<div class="modal-backdrop">${innerHtml}</div>`;
-  requestAnimationFrame(() => {
-    const focusable = $(focusSelector);
-    focusable?.focus();
-  });
-}
-
-function closeModal() {
-  app.modalOpen = false;
-  app.pendingConfirm = null;
-  $('#modal-root').innerHTML = '';
-}
-
-function confirmModal({ title, message, confirmLabel = 'Confirm', danger = false, action }) {
-  app.pendingConfirm = action;
-  openModal(
-    modalShell({
-      title,
-      body: `<p class="confirm-copy">${message}</p>`,
-      footer: `<button class="btn ghost" data-action="close-modal">Cancel</button>
-        <button class="btn ${danger ? 'danger' : 'primary'}" data-action="confirm-action">${esc(
-          confirmLabel
-        )}</button>`,
-    })
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Transaction modal                                                  */
-/* ------------------------------------------------------------------ */
-
-function typeOption(value, label, current) {
-  return `<label><input type="radio" name="tx-type" value="${value}" ${
-    value === current ? 'checked' : ''
-  } /><span>${label}</span></label>`;
-}
-
-function categoryOptions(categories, selectedId) {
-  return categories
-    .map(
-      (category) =>
-        `<option value="${esc(category.id)}" ${
-          category.id === selectedId ? 'selected' : ''
-        }>${esc(category.icon)} ${esc(category.name)} — ${money(category.balancePaise)}</option>`
-    )
-    .join('');
-}
-
-function defaultCategoryId(categories) {
-  return (
-    categories.find((category) => category.kind === 'flex' && category.balancePaise > 0)?.id ||
-    categories.find((category) => category.balancePaise > 0)?.id ||
-    categories.find((category) => category.id === 'misc')?.id ||
-    categories[0]?.id ||
-    ''
-  );
-}
-
-function allowedCategoriesForType(type, categories) {
-  if (type === 'expense' || type === 'refund') {
-    return categories.filter((category) => ['spending', 'bill'].includes(categoryType(category)));
-  }
-  if (type === 'transfer' || type === 'withdraw') {
-    return categories.filter((category) =>
-      ['saving', 'investment', 'loan'].includes(categoryType(category))
-    );
-  }
-  return categories;
-}
-
-function defaultCategoryIdForType(type, categories) {
-  const findType = (wanted) =>
-    categories.find((category) => categoryType(category) === wanted)?.id;
-  if (type === 'transfer') {
-    return findType('investment') || findType('saving') || findType('loan') || categories[0]?.id || '';
-  }
-  if (type === 'withdraw') {
-    return findType('saving') || findType('investment') || findType('loan') || categories[0]?.id || '';
-  }
-  return defaultCategoryId(categories);
-}
-
-function openTxModal({ id, categoryId, kind, amountPaise, description } = {}) {
-  const transaction = id ? app.data.transactions.find((item) => item.id === id) : null;
-  if (transaction?.kind === 'adjustment') {
-    openAdjustmentModal(transaction);
-    return;
-  }
-  const categories = activeCategories();
-  if (transaction?.categoryId) {
-    const existingCategory = categoryById(transaction.categoryId);
-    if (existingCategory && !categories.some((category) => category.id === existingCategory.id)) {
-      categories.push(existingCategory);
-    }
-  }
-
-  const initialType = transaction
-    ? transaction.kind === 'income'
-      ? 'income'
-      : transaction.kind === 'transfer'
-        ? transaction.direction === 'in'
-          ? 'withdraw'
-          : 'transfer'
-        : transaction.direction === 'in'
-          ? 'refund'
-          : 'expense'
-    : kind === 'income'
-      ? 'income'
-      : kind === 'transfer'
-        ? 'transfer'
-        : 'expense';
-
-  const allowed = allowedCategoriesForType(initialType, categories);
-  const desiredCategory = transaction?.categoryId || categoryId;
-  const selectedCategory = allowed.some((category) => category.id === desiredCategory)
-    ? desiredCategory
-    : defaultCategoryIdForType(initialType, allowed);
-
-  const body = `<form data-form="tx" data-id="${esc(transaction?.id || '')}">
-    <div class="seg" role="radiogroup" aria-label="Type">
-      ${typeOption('expense', 'Spent', initialType)}
-      ${typeOption('income', 'Received', initialType)}
-      ${typeOption('transfer', 'Moved out', initialType)}
-      ${typeOption('refund', 'Refund', initialType)}
-      ${typeOption('withdraw', 'Withdrawal', initialType)}
-    </div>
-
-    <label class="field amount-field">
-      <span>Amount</span>
-      <div class="money-input big"><span>₹</span><input name="amount" type="number" min="0.01" step="0.01" value="${
-        transaction ? transaction.amountPaise / 100 : amountPaise ? amountPaise / 100 : ''
-      }" placeholder="0" inputmode="decimal" required /></div>
-    </label>
-
-    <label class="field">
-      <span>Description</span>
-      <input name="description" value="${esc(
-        transaction?.description || description || ''
-      )}" placeholder="Swiggy, rent, salary…" maxlength="120" required />
-    </label>
-
-    <div class="form-grid">
-      <label class="field">
-        <span>Date</span>
-        <input name="date" type="date" value="${transaction?.date || todayStr()}" max="${todayStr()}" required />
-      </label>
-      <label class="field" data-field="category">
-        <span data-cat-label>Bucket</span>
-        <select name="categoryId">${categoryOptions(allowed, selectedCategory)}</select>
-      </label>
-    </div>
-
-    <p class="hint" data-hint></p>
-    <p class="hint done-warning" data-done-warning hidden></p>
-    <p class="hint bucket-warning" data-bucket-warning hidden></p>
-
-    <label class="field">
-      <span>Note <em>optional</em></span>
-      <input name="notes" value="${esc(transaction?.notes || '')}" maxlength="300" />
-    </label>
-
-    <div class="modal-actions">
-      ${
-        transaction
-          ? `<button type="button" class="link-btn danger" data-action="delete-tx" data-id="${esc(
-              transaction.id
-            )}">Delete</button>`
-          : '<span></span>'
-      }
-      <div>
-        <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
-        <button type="submit" class="btn primary" data-submit-button>${transaction ? 'Save changes' : 'Add transaction'}</button>
-      </div>
-    </div>
-  </form>`;
-
-  openModal(
-    modalShell({
-      title: transaction ? 'Edit transaction' : 'Add transaction',
-      subtitle: transaction
-        ? 'Changes update the bucket immediately.'
-        : 'Money in, money out, or money moved.',
-      body,
-    }),
-    '#modal-root [data-form="tx"] [name="amount"]'
-  );
-  updateTxModalFields();
-}
-
-function openAdjustmentModal(transaction) {
-  const body = `<dl class="kv">
-    ${kv('Date', formatDate(transaction.date))}
-    ${kv('Amount', money(transaction.amountPaise))}
-    ${kv('Direction', transaction.direction === 'in' ? 'Added to bank balance' : 'Removed from bank balance')}
-    ${kv('Note', esc(transaction.notes || '—'))}
-  </dl>
-  <p class="hint">This came from <strong>Check bank balance</strong>. It is not spending and does not belong to a bucket. Deleting it moves the app's balance away from the buckets.</p>
-  <div class="modal-actions">
-    <span></span>
-    <div>
-      <button class="btn ghost" data-action="close-modal">Close</button>
-      <button class="btn danger" data-action="delete-tx" data-id="${esc(transaction.id)}">Delete</button>
-    </div>
-  </div>`;
-  openModal(
-    modalShell({
-      title: 'Balance fix',
-      subtitle: 'A correction, not an expense.',
-      body,
-    })
-  );
-}
-
-function openHelpModal() {
-  const body = `
-    <div class="help-steps">
-      <div class="help-step"><span>1</span><div><strong>Salary day</strong><p>Press <b>Add income</b>, enter the salary, and save. The app immediately asks you to <b>Divide salary</b> — press it. Do this once a month, after the full salary is in.</p></div></div>
-      <div class="help-step"><span>2</span><div><strong>When you spend</strong><p>Press <b>Add expense</b>, enter the amount, and choose a bucket. The app subtracts it from that bucket.</p></div></div>
-      <div class="help-step"><span>3</span><div><strong>If the big number looks wrong</strong><p>Press <b>Check balance</b> and type what your bank app shows. The app fixes the difference.</p></div></div>
-      <div class="help-step"><span>4</span><div><strong>Next month</strong><p>Add the new salary and divide it again. Clothes and electronics keep their leftovers; groceries and fun start fresh.</p></div></div>
-    </div>
-
-    <div class="help-note"><strong>The app does not move your money.</strong> Your bank has one balance. The app puts labels on parts of it. Those labels are called <strong>buckets</strong>.</div>
-    <p class="hint">If you set up after your salary already landed, don't add it again — it is already in your bank balance.</p>
-    <p class="hint">If extra money arrives after this month is already divided, it shows as <strong>not divided</strong>. Open <b>Move money</b> → <b>From: Not divided</b> → choose the bucket. Or leave it for next month.</p>
-    <p class="hint">Dates cannot be in the future. The app records money after it has actually moved.</p>
-
-    <h3 class="help-title">Words you will see</h3>
-    <dl class="glossary">
-      <div><dt>Bucket</dt><dd>A labelled part of your money, like Rent, Food, or Clothes.</dd></div>
-      <div><dt>Bills</dt><dd>Rent and utilities. The same amount every month.</dd></div>
-      <div><dt>Savings</dt><dd>Emergency fund. The same amount every month; leftovers stay.</dd></div>
-      <div><dt>Investments</dt><dd>SIPs, PPF, stocks. The same amount every month; leftovers stay.</dd></div>
-      <div><dt>Loans</dt><dd>EMIs. The same amount every month.</dd></div>
-      <div><dt>Spending</dt><dd>The rest, split by percentage across everyday buckets.</dd></div>
-      <div><dt>Moved out</dt><dd>Money left your bank for savings, an investment, or a loan payment. Not spending.</dd></div>
-      <div><dt>Withdrawal</dt><dd>Money came back from a savings bucket, investment, or loan.</dd></div>
-      <div><dt>Divide salary</dt><dd>Press once on payday to fill all the buckets.</dd></div>
-      <div><dt>Not divided</dt><dd>Money in your bank that is not in a bucket yet.</dd></div>
-      <div><dt>Keep leftover</dt><dd>Positive leftover stays for next month. Overspending always carries forward, whether Keep is on or off.</dd></div>
-      <div><dt>Max</dt><dd>The most a bucket can build up before extra money goes to Emergency. It does not forgive overspending.</dd></div>
-    </dl>
-
-    <h3 class="help-title">How buckets behave</h3>
-    <ul class="help-list">
-      <li><strong>Bills — Rent, utilities.</strong> Refill every month, get used up, then start fresh.</li>
-      <li><strong>Savings — Emergency fund.</strong> Refill every month and keep their leftover.</li>
-      <li><strong>Investments — SIP, PPF, stocks.</strong> Refill every month and keep their leftover.</li>
-      <li><strong>Loans — EMIs.</strong> Refill every month. Use “Moved out” to pay the lender.</li>
-      <li><strong>Spending — Groceries, transport, fun.</strong> Refill every month, then start fresh. Overspending carries forward.</li>
-      <li><strong>Saving-up spending — Clothes, electronics.</strong> Refill, and keep leftover up to Max. Overspending carries forward.</li>
-    </ul>
-    <p class="hint">Each type only accepts the right movement. Bills and spending accept <b>Spent</b> and <b>Refund</b>. Savings, investments and loans accept <b>Moved out</b> and <b>Withdrawal</b>. You cannot spend directly from an investment bucket — move money to a spending bucket first.</p>
-    <p class="hint">You can add as many bills, savings, investments and loans as you want. Each gets its own amount, Keep and Max setting.</p>
-
-    <h3 class="help-title">Spending percentages</h3>
-    <p class="hint">Fixed buckets come first. A spending percentage is a share of <b>what is left</b> after bills, savings, investments and loans — not a share of your total salary or bank balance. If your salary is ₹1,00,000 and fixed buckets take ₹60,000, the spending pool is ₹40,000. Clothes at 10% gets ₹4,000. All spending percentages must add up to 100%.</p>
-
-    <h3 class="help-title">Overspending</h3>
-    <p class="hint">If you spend more than a spending bucket has, the app records the full amount and shows a minus balance. Next month the bucket gets its normal plan amount, but the overspend is deducted first. Example: Clothes plan ₹4,000, overspend ₹1,000 — next month it gets ₹3,000, not ₹4,000. The card shows “Started ₹1,000 lower · carried overspend.”</p>
-    <p class="hint">Keep leftover controls positive money only; a negative balance always carries. Max caps positive buildup, not overspending. Use <b>Cover overspend</b> on the card to clear it from another bucket. Fixed bills and EMIs are not reduced automatically — the app warns and refills them to the full target.</p>
-
-    <h3 class="help-title">Monthly ticks</h3>
-    <ul class="help-list">
-      <li><strong>Bills</strong> tick when this month's Spent amount reaches the target.</li>
-      <li><strong>Savings</strong> tick when this month's amount is funded by Divide salary. Money already kept in the bank counts as saved.</li>
-      <li><strong>Investments</strong> tick when this month's Moved out amount reaches the target.</li>
-      <li><strong>Loans</strong> tick when this month's loan payment reaches the target.</li>
-      <li><strong>Spending</strong> has no tick; it is ongoing.</li>
-    </ul>
-    <p class="hint">The tick uses this month's activity, not the bucket balance. A transaction's date decides which month it counts in. Extra payments are allowed — you will see a warning, but the app will not block you. Editing or deleting a payment updates the tick automatically.</p>
-    <p class="hint">A <b>Withdrawal</b> redemption is a return, not a new investment. It does not remove that month's investment tick.</p>
-
-    <h3 class="help-title">Investments</h3>
-    <ul class="help-list">
-      <li><strong>Put in</strong> — money you moved out to this investment.</li>
-      <li><strong>Took out</strong> — money you withdrew back to your bank.</li>
-      <li><strong>Worth now</strong> — what the investment is worth today. You type it in.</li>
-      <li><strong>Gain / loss</strong> — worth now + took out − put in.</li>
-    </ul>
-    <p class="hint">The amount shown on the investment bucket is cash in your bank. It is not what the investment is worth. Update <b>Worth now</b> after you invest or withdraw so the gain stays right. The gain hides until you update it.</p>
-    <p class="hint">Record every return from an investment as <b>Withdrawal</b>, including profit. Gain needs at least one recorded <b>Moved out</b>. For an investment you already owned before using the app, the panel shows <b>No history</b> instead of guessing.</p>
-
-    <h3 class="help-title">If the bank does not match</h3>
-    <p class="hint">The app only knows what you have logged. If your bank shows less, you probably spent something and forgot to log it. Use <b>Check balance</b> → <b>Record missing expense</b>. If the bank shows more, record missing income. For a bank charge or interest, use <b>Just match totals</b>.</p>
-    <p class="hint">Matching totals only changes <b>Not divided</b>. It never changes your buckets. If it would make your buckets short, record the expense instead or move money from another bucket.</p>
-
-    <details class="help-more">
-      <summary>What happens to leftover money?</summary>
-      <p>Clothes and Electronics keep their leftover up to their Max. If Clothes has ₹1,000 left and next month adds ₹4,000, it becomes ₹5,000. Groceries, Transport, Fun and Misc start fresh each month, so unused money does not pile up forever.</p>
-    </details>
-    <details class="help-more">
-      <summary>Do I have to use every feature?</summary>
-      <p>No. For normal use you only need Add income, Divide salary, Add expense, and Check bank balance. Investments, refunds, automation and the plan editor are optional.</p>
-    </details>
-  `;
-
-  openModal(
-    modalShell({
-      title: 'How to use Khaata',
-      subtitle: 'Four steps. Four buttons.',
-      body,
-      footer: `<button class="btn primary" data-action="close-modal">Got it</button>`,
-    })
-  );
-}
-
-function updateTxModalFields() {
-  const form = $('[data-form="tx"]');
-  if (!form) return;
-  const selected = form.querySelector('[name="tx-type"]:checked');
-  if (!selected) return;
-  const type = selected.value;
-  const categoryField = form.querySelector('[data-field="category"]');
-  categoryField.hidden = type === 'income';
-
-  if (type !== 'income') {
-    const all = activeCategories();
-    const select = form.querySelector('[name="categoryId"]');
-    const currentId = select.value;
-    const currentCategory = categoryById(currentId);
-    if (currentCategory && !all.some((category) => category.id === currentCategory.id)) {
-      all.push(currentCategory);
-    }
-    const allowed = allowedCategoriesForType(type, all);
-    const nextId = allowed.some((category) => category.id === currentId)
-      ? currentId
-      : defaultCategoryIdForType(type, allowed);
-    select.innerHTML = categoryOptions(allowed, nextId);
-    select.disabled = allowed.length === 0;
-  }
-
-  updateTxActionLabels();
-}
-
-function updateTxActionLabels() {
-  const form = $('[data-form="tx"]');
-  if (!form) return;
-  const selected = form.querySelector('[name="tx-type"]:checked');
-  if (!selected) return;
-  const type = selected.value;
-  const select = form.querySelector('[name="categoryId"]');
-  const category = select ? categoryById(select.value) : null;
-  const subtype = category ? categoryType(category) : '';
-
-  let catLabel = 'Bucket';
-  let hint = '';
-  let action = 'Add transaction';
-
-  if (type === 'expense') {
-    catLabel = 'Bucket';
-    hint = 'This money leaves the bucket.';
-    action = 'Add expense';
-  } else if (type === 'refund') {
-    catLabel = 'Back to bucket';
-    hint = 'Money returned to this bucket.';
-    action = 'Add refund';
-  } else if (type === 'income') {
-    catLabel = '';
-    hint = 'Money coming in. After saving, the app will offer to divide it.';
-    action = 'Add income';
-  } else if (type === 'transfer') {
-    catLabel = 'From bucket';
-    if (subtype === 'saving') {
-      hint = 'Money moved from this bucket to savings. Not counted as spending.';
-      action = 'Add saving';
-    } else if (subtype === 'investment') {
-      hint = 'Money invested from this bucket. Not counted as spending.';
-      action = 'Add investment';
-    } else if (subtype === 'loan') {
-      hint = 'Loan payment from this bucket. Not counted as spending.';
-      action = 'Pay loan';
-    }
-  } else if (type === 'withdraw') {
-    catLabel = 'To bucket';
-    action = 'Add withdrawal';
-    if (subtype === 'saving') {
-      hint = 'Money taken back from savings.';
-    } else if (subtype === 'investment') {
-      hint = 'Money returned from an investment.';
-    } else if (subtype === 'loan') {
-      hint = 'Money returned from a loan.';
-    }
-  }
-
-  const emptyOptions = type !== 'income' && select ? select.options.length === 0 : false;
-  if (emptyOptions) {
-    hint =
-      type === 'expense' || type === 'refund'
-        ? 'Add a spending or bill bucket in Plan first.'
-        : 'Add a savings, investment or loan bucket in Plan first.';
-  }
-
-  form.querySelector('[data-cat-label]').textContent = catLabel;
-  form.querySelector('[data-hint]').textContent = hint;
-
-  const warning = form.querySelector('[data-done-warning]');
-  if (warning) {
-    const commitment = (app.data.derived.commitments || []).find(
-      (item) => item.categoryId === category?.id
-    );
-    const outgoing = type === 'expense' || type === 'transfer';
-    if (!form.dataset.id && outgoing && commitment?.status === 'done') {
-      warning.hidden = false;
-      warning.textContent = `${category.name} is already done this month. Adding extra is allowed.`;
-    } else {
-      warning.hidden = true;
-      warning.textContent = '';
-    }
-  }
-
-  const submit = form.querySelector('[data-submit-button]');
-  if (submit) {
-    submit.textContent = form.dataset.id ? 'Save changes' : action;
-    submit.disabled = emptyOptions;
-  }
-
-  updateBucketWarning();
-}
-
-function updateBucketWarning() {
-  const form = $('[data-form="tx"]');
-  if (!form) return;
-  const warning = form.querySelector('[data-bucket-warning]');
-  if (!warning) return;
-
-  const selected = form.querySelector('[name="tx-type"]:checked');
-  const select = form.querySelector('[name="categoryId"]');
-  const category = select ? categoryById(select.value) : null;
-  const amount = toPaise(form.querySelector('[name="amount"]')?.value);
-  const type = selected?.value;
-
-  if (
-    !category ||
-    !Number.isSafeInteger(amount) ||
-    amount <= 0 ||
-    (type !== 'expense' && type !== 'transfer')
-  ) {
-    warning.hidden = true;
-    warning.textContent = '';
-    return;
-  }
-
-  // If this form is editing a transaction in the same bucket, work out the
-  // balance as if that old transaction were removed first.
-  let available = category.balancePaise;
-  const existing = form.dataset.id
-    ? app.data.transactions.find((transaction) => transaction.id === form.dataset.id)
-    : null;
-  if (existing && existing.categoryId === category.id) {
-    const oldEffect =
-      existing.direction === 'in' ? existing.amountPaise : -existing.amountPaise;
-    available -= oldEffect;
-  }
-
-  const after = available - amount;
-  if (after >= 0) {
-    warning.hidden = true;
-    warning.textContent = '';
-    return;
-  }
-
-  const shortfall = -after;
-  const bucketType = categoryType(category);
-  if (bucketType === 'spending') {
-    const alreadyOver = Math.max(0, -available);
-    const consequence = app.data.derived.allocation
-      ? `Next month's ${category.name} money will be ${money(shortfall)} lower.`
-      : `When you divide this month, ${category.name} will get ${money(shortfall)} less.`;
-    if (alreadyOver > 0) {
-      warning.textContent = `${category.name} is already ${money(
-        alreadyOver
-      )} over. This adds ${money(
-        shortfall - alreadyOver
-      )}, making it ${money(shortfall)} over. ${consequence}`;
-    } else {
-      warning.textContent = `This is ${money(
-        shortfall
-      )} more than ${category.name} has. ${consequence}`;
-    }
-  } else {
-    warning.textContent = `${category.name} is ${money(
-      shortfall
-    )} short after this. The next salary division will refill it to the full target.`;
-  }
-  warning.hidden = false;
-}
-
-/* ------------------------------------------------------------------ */
-/* Other modals                                                       */
-/* ------------------------------------------------------------------ */
-
-function openReconcileModal() {
-  const derived = app.data.derived;
-  const body = `<form data-form="reconcile" data-app-balance="${derived.bankBalancePaise}">
-    <p class="hint">The app only knows the transactions you have logged. It is not a live bank connection.</p>
-    <label class="field">
-      <span>What does your bank app show?</span>
-      <div class="money-input"><span>₹</span><input name="balance" type="number" min="0" step="0.01" value="${rupeesInput(
-        derived.bankBalancePaise
-      )}" inputmode="decimal" required /></div>
-    </label>
-    <div class="reconcile-diff" id="reconcile-diff"></div>
-    <label class="field">
-      <span>Note <em>optional</em></span>
-      <input name="note" placeholder="e.g. bank charge" maxlength="160" />
-    </label>
-    <div class="modal-actions">
-      <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
-      <div class="reconcile-buttons">
-        <button type="submit" class="btn ghost" id="reconcile-match">Just match totals</button>
-        <button type="button" class="btn primary" data-action="reconcile-classify" id="reconcile-classify">Record missing expense</button>
-      </div>
-    </div>
-  </form>`;
-  openModal(
-    modalShell({
-      title: 'Check bank balance',
-      subtitle: 'Find out why the numbers differ.',
-      body,
-    })
-  );
-  updateReconcilePreview();
-}
-
-function updateReconcilePreview() {
-  const form = $('[data-form="reconcile"]');
-  if (!form) return;
-  const appBalance = Number(form.dataset.appBalance);
-  const actual = toPaise(form.elements.balance.value);
-  const diff = actual - appBalance;
-  const status = $('#reconcile-diff');
-  const classify = $('#reconcile-classify');
-  const match = $('#reconcile-match');
-  if (!status || !classify || !match) return;
-
-  if (diff === 0) {
-    status.className = 'reconcile-diff ok';
-    status.innerHTML = `<strong>They already match.</strong><span>Nothing to fix.</span>`;
-    classify.disabled = true;
-    match.disabled = true;
-    return;
-  }
-
-  classify.disabled = false;
-  match.disabled = false;
-
-  if (diff < 0) {
-    const finalUnallocated = app.data.derived.unallocatedPaise + diff;
-    const shortfall = finalUnallocated < 0 ? -finalUnallocated : 0;
-    status.className = 'reconcile-diff warn';
-    status.innerHTML = `<strong>Your bank is ${money(-diff)} lower than the app.</strong><span>Usually a missed expense or a bank charge. Record it as spending so the right bucket pays for it.</span>${
-      shortfall > 0
-        ? `<span class="reconcile-warning">Matching the totals instead will make your buckets short by ${money(
-            shortfall
-          )}.</span>`
-        : ''
-    }`;
-    classify.textContent = 'Record missing expense';
-  } else {
-    status.className = 'reconcile-diff warn';
-    status.innerHTML = `<strong>Your bank is ${money(diff)} more than the app.</strong><span>Usually missed income or a refund. Record it, or just match the totals.</span>`;
-    classify.textContent = 'Record missing income';
-  }
-}
-
-function allocationWarnings(derived) {
-  const targets = new Map(derived.plan.items.map((item) => [item.categoryId, item.targetPaise]));
-  const categories = activeCategories();
-  const spending = categories.filter(
-    (category) => categoryType(category) === 'spending' && category.balancePaise < 0
-  );
-  const fixed = categories.filter(
-    (category) =>
-      ['bill', 'loan'].includes(categoryType(category)) && category.balancePaise < 0
-  );
-
-  const spendingItems = spending
-    .map((category) => {
-      const target = targets.get(category.id) ?? 0;
-      const over = -category.balancePaise;
-      const rawCarry = category.rollover
-        ? category.balancePaise
-        : Math.min(0, category.balancePaise);
-      let available = target + rawCarry;
-      if (category.capPaise !== null && category.capPaise !== undefined) {
-        available = Math.min(available, category.capPaise);
-      }
-      const appliedCarry = available - target;
-      const carryText =
-        appliedCarry < 0 ? ` · carried −${money(-appliedCarry)}` : '';
-      const availableText =
-        available >= 0
-          ? `${money(available)} available this month`
-          : `${money(-available)} still owed after this month's plan`;
-      return `<li><strong>${esc(category.name)}</strong> is ${money(
-        over
-      )} over. Plan ${money(target)}${carryText} · ${availableText}.</li>`;
-    })
-    .join('');
-
-  const fixedItems = fixed
-    .map((category) => {
-      const target = targets.get(category.id) ?? 0;
-      const refillText =
-        target > 0
-          ? `It will be refilled to its ${money(target)} target. Fixed bills and EMIs are not reduced automatically.`
-          : 'It has no plan amount, so the shortfall stays.';
-      return `<li><strong>${esc(category.name)}</strong> is ${money(
-        -category.balancePaise
-      )} short. ${refillText}</li>`;
-    })
-    .join('');
-
-  if (!spendingItems && !fixedItems) return '';
-
-  return `<div class="allocation-warnings">
-    ${
-      spendingItems
-        ? `<div class="allocation-warning spend"><strong>Overspending carried forward</strong><ul>${spendingItems}</ul><p>Each spending bucket gets its normal plan amount. The overspend reduces what is available this month.</p></div>`
-        : ''
-    }
-    ${
-      fixedItems
-        ? `<div class="allocation-warning fixed"><strong>Fixed buckets are short</strong><ul>${fixedItems}</ul><p>If the bank does not have enough, the division will stop and ask you to cover the shortfall.</p></div>`
-        : ''
-    }
-  </div>`;
-}
-
-function openAllocateModal() {
-  const derived = app.data.derived;
-  const surplus = categoryById(app.data.settings.surplusCategoryId);
-  const body = `<form data-form="allocate">
-    <p class="confirm-copy">This puts money into your bills, savings and spending buckets. Anything extra goes to <strong>${esc(
-      surplus?.name || 'Emergency'
-    )}</strong>.</p>
-    <dl class="kv">
-      ${kv('Monthly plan', money(derived.plan.totalPaise))}
-      ${kv('Money ready to divide', money(derived.unallocatedPaise))}
-      ${kv('Leftover in buckets', 'Stays where it is')}
-    </dl>
-    ${allocationWarnings(derived)}
-    <p class="hint">You can undo this until you record spending or move money.</p>
-    <div class="modal-actions">
-      <span></span>
-      <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Divide salary</button></div>
-    </div>
-  </form>`;
-  openModal(
-    modalShell({
-      title: 'Divide this month\'s salary',
-      subtitle: 'Once a month. Fills every bucket.',
-      body,
-    })
-  );
-}
-
-function openInvestmentValueModal(investment) {
-  const body = `<form data-form="investment-value" data-id="${esc(investment.categoryId)}">
-    <p class="hint">Put in ${money(investment.putInPaise)} · Took out ${money(
-      investment.tookOutPaise
-    )}.</p>
-    <label class="field">
-      <span>Worth now</span>
-      <div class="money-input"><span>₹</span><input name="worth" type="number" min="0" step="0.01" value="${
-        investment.worthPaise === null ? '' : rupeesInput(investment.worthPaise)
-      }" placeholder="e.g. 22000" inputmode="decimal" required /></div>
-    </label>
-    <p class="hint">Enter what the investment is worth today, not the cash sitting in the bucket. Put 0 if you have taken everything out. This does not move any money.</p>
-    <div class="modal-actions">
-      <span></span>
-      <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Save worth</button></div>
-    </div>
-  </form>`;
-  openModal(
-    modalShell({
-      title: 'Update investment worth',
-      subtitle: 'This only updates the value shown in the app.',
-      body,
-    })
-  );
-}
-
-function openMoveModal(toId) {
-  const categories = activeCategories();
-  const unallocated = app.data.derived.unallocatedPaise;
-  const positiveCategories = categories.filter((category) => category.balancePaise > 0);
-  if (unallocated <= 0 && positiveCategories.length === 0) {
-    toast('No money is available to move.', 'error');
-    return;
-  }
-
-  const target = toId ? categoryById(toId) : null;
-  const largest = [...positiveCategories].sort((a, b) => b.balancePaise - a.balancePaise)[0];
-  const lowestFlex = [...categories]
-    .filter((category) => category.kind === 'flex')
-    .sort((a, b) => a.balancePaise - b.balancePaise)[0];
-
-  let fromId;
-  let toDefault;
-  let defaultAmount = '';
-
-  if (target && target.balancePaise < 0) {
-    fromId = largest?.id || UNALLOCATED_ID;
-    toDefault = target.id;
-    const available = fromId === UNALLOCATED_ID ? unallocated : categoryById(fromId)?.balancePaise || 0;
-    defaultAmount = Math.min(available, -target.balancePaise) / 100;
-  } else if (unallocated < 0) {
-    fromId = largest?.id || '';
-    toDefault = UNALLOCATED_ID;
-    defaultAmount = largest ? Math.min(largest.balancePaise, -unallocated) / 100 : '';
-  } else if (unallocated > 0) {
-    fromId = UNALLOCATED_ID;
-    const surplusCategory = categories.find(
-      (category) => category.id === app.data.settings.surplusCategoryId
-    );
-    toDefault = surplusCategory?.id || lowestFlex?.id || categories[0]?.id || '';
-    defaultAmount = unallocated / 100;
-  } else {
-    fromId = largest?.id || '';
-    const deficit = categories.find((category) => category.balancePaise < 0 && category.id !== fromId);
-    toDefault = deficit?.id || lowestFlex?.id || categories.find((category) => category.id !== fromId)?.id || '';
-  }
-
-  if (fromId === toDefault) {
-    fromId = unallocated > 0 ? UNALLOCATED_ID : largest?.id || '';
-    if (fromId === toDefault) {
-      toDefault = categories.find((category) => category.id !== fromId)?.id || UNALLOCATED_ID;
-    }
-  }
-
-  const unallocatedLabel =
-    unallocated < 0
-      ? `Not divided (short by ${money(-unallocated)})`
-      : `Not divided — ${money(unallocated)}`;
-
-  const categoryOption = (category, selected) =>
-    `<option value="${esc(category.id)}" ${category.id === selected ? 'selected' : ''}>${esc(
-      category.icon
-    )} ${esc(category.name)} — ${money(category.balancePaise)}</option>`;
-
-  const fromOptions = (selected) =>
-    `${
-      unallocated > 0
-        ? `<option value="${UNALLOCATED_ID}" ${selected === UNALLOCATED_ID ? 'selected' : ''}>💤 ${unallocatedLabel}</option>`
-        : ''
-    }${positiveCategories.map((category) => categoryOption(category, selected)).join('')}`;
-
-  const toOptions = (selected) =>
-    `${categories.map((category) => categoryOption(category, selected)).join('')}<option value="${UNALLOCATED_ID}" ${
-      selected === UNALLOCATED_ID ? 'selected' : ''
-    } ${fromId === UNALLOCATED_ID ? 'disabled' : ''}>💤 ${unallocatedLabel}</option>`;
-
-  const body = `<form data-form="move">
-    <p class="hint">You can move money from Not divided into a bucket, or take it out of a bucket.</p>
-    <div class="form-grid">
-      <label class="field"><span>From</span><select name="fromCategoryId">${fromOptions(fromId)}</select></label>
-      <label class="field"><span>To</span><select name="toCategoryId">${toOptions(toDefault)}</select></label>
-    </div>
-    <label class="field amount-field">
-      <span>Amount</span>
-      <div class="money-input big"><span>₹</span><input name="amount" type="number" min="0.01" step="0.01" value="${defaultAmount}" placeholder="0" inputmode="decimal" required /></div>
-    </label>
-    <label class="field"><span>Note <em>optional</em></span><input name="note" maxlength="160" placeholder="Why are you moving it?" /></label>
-    <div class="modal-actions">
-      <span></span>
-      <div><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">Move money</button></div>
-    </div>
-  </form>`;
-  openModal(
-    modalShell({
-      title: 'Move money',
-      subtitle: 'This only changes the labels. Your bank balance stays the same.',
-      body,
-    })
-  );
-}
-
-function askUndoAllocation() {
-  const allocation = app.data.derived.allocation;
-  if (!allocation) return;
-  if (!allocation.canUndo) {
-    toast('Spending is recorded for this month. Move money between buckets instead.', 'error');
-    return;
-  }
-  confirmModal({
-    title: `Undo ${monthLabel(allocation.period)}'s division?`,
-    message:
-      'Bucket balances go back to how they were before this division. Spending recorded since then stays, so some buckets may become negative. You can divide again afterwards.',
-    confirmLabel: 'Undo division',
-    danger: true,
-    action: async () => {
-      const response = await api(`/api/allocations/${allocation.id}/undo`, { method: 'POST' });
-      acceptState(response.state);
-      render();
-      toast('Division undone.');
-    },
-  });
-}
-
-/* ------------------------------------------------------------------ */
-/* Setup                                                              */
-/* ------------------------------------------------------------------ */
-
-async function startDemo() {
-  const response = await api('/api/setup', { method: 'POST', body: { mode: 'demo' } });
-  acceptState(response.state);
-  app.view = 'dashboard';
-  app.planDirty = false;
-  history.replaceState(null, '', '#dashboard');
-  render();
-  toast('Demo data loaded. Reset it any time from Settings.');
-}
-
-function fatalView(error) {
-  return `<div class="setup"><div class="setup-card">
-    <p class="eyebrow">Khaata</p>
-    <h1>Could not load.</h1>
-    <p class="lede">${esc(error.message)}</p>
-    <p class="fine">Make sure the server is running with <code>npm start</code>.</p>
-    <button class="btn primary wide" data-action="reload">Retry</button>
-  </div></div>`;
-}
-
-/* ------------------------------------------------------------------ */
-/* Events                                                             */
-/* ------------------------------------------------------------------ */
-
-function navigate(view) {
-  if (app.view === view) return;
-  if (app.view === 'plan' && app.planDirty && view !== 'plan') {
-    if (!window.confirm('Discard unsaved plan changes?')) return;
-  }
-  app.view = view;
-  app.planDirty = false;
-  if (location.hash !== `#${view}`) {
-    history.pushState(null, '', `#${view}`);
-  }
-  render();
-  window.scrollTo({ top: 0, behavior: 'instant' });
-}
-
-window.addEventListener('popstate', () => {
-  const view = viewFromHash();
-  if (view === app.view) return;
-  if (app.view === 'plan' && app.planDirty) {
-    if (!window.confirm('Discard unsaved plan changes?')) {
-      history.pushState(null, '', '#plan');
-      return;
-    }
-  }
-  app.view = view;
-  app.planDirty = false;
-  render();
-  window.scrollTo({ top: 0, behavior: 'instant' });
-});
-
-async function handleAction(element) {
-  const action = element.dataset.action;
-
-  switch (action) {
-    case 'nav':
-      navigate(element.dataset.view);
-      return;
-    case 'reload':
-      location.reload();
-      return;
-    case 'demo-setup':
-      await startDemo();
-      return;
-    case 'open-tx':
-      openTxModal({ categoryId: element.dataset.category, kind: element.dataset.kind });
-      return;
-    case 'edit-tx':
-      openTxModal({ id: element.dataset.id });
-      return;
-    case 'open-reconcile':
-      openReconcileModal();
-      return;
-    case 'reconcile-classify': {
-      const form = $('[data-form="reconcile"]');
-      if (!form) return;
-      const appBalance = Number(form.dataset.appBalance);
-      const actual = toPaise(form.elements.balance.value);
-      const diff = actual - appBalance;
-      if (diff === 0) return;
-      closeModal();
-      openTxModal({
-        kind: diff > 0 ? 'income' : 'expense',
-        amountPaise: Math.abs(diff),
-        description: diff > 0 ? 'Missed income' : 'Missed expense',
-      });
-      return;
-    }
-    case 'open-help':
-      openHelpModal();
-      return;
-    case 'open-allocate':
-      openAllocateModal();
-      return;
-    case 'update-investment-value': {
-      const investment = (app.data.derived.investments || []).find(
-        (item) => item.categoryId === element.dataset.id
-      );
-      if (investment) openInvestmentValueModal(investment);
-      return;
-    }
-    case 'open-move':
-      openMoveModal(element.dataset.to);
-      return;
-    case 'close-modal':
-      closeModal();
-      return;
-    case 'undo-allocation':
-      askUndoAllocation();
-      return;
-    case 'add-row':
-      addPlanRow(element.dataset.kind, element.dataset.type);
-      return;
-    case 'remove-row':
-      removePlanRow(element);
-      return;
-    case 'cycle-icon': {
-      const row = element.closest('.plan-row');
-      if (!row) return;
-      const icons = ['🏠', '🛒', '🚌', '👕', '💻', '🎬', '🧾', '📈', '🛡️', '🏦', '🎧', '✈️', '🎁', '💊', '📚', '☕'];
-      const current = icons.indexOf(row.dataset.icon);
-      const next = icons[(current + 1) % icons.length];
-      row.dataset.icon = next;
-      element.textContent = next;
-      markPlanDirty();
-      return;
-    }
-    case 'discard-plan':
-      app.planDirty = false;
-      await load();
-      toast('Plan changes discarded.');
-      return;
-    case 'tx-filter':
-      app.txKind = element.dataset.kind;
-      applyTxFilter();
-      return;
-    case 'delete-tx': {
-      const id = element.dataset.id;
-      const transaction = app.data.transactions.find((item) => item.id === id);
-      confirmModal({
-        title: 'Delete transaction?',
-        message: `“${esc(transaction?.description || 'This transaction')}” will be removed and its effect on the bucket reversed.`,
-        confirmLabel: 'Delete',
-        danger: true,
-        action: async () => {
-          const response = await api(`/api/transactions/${id}`, { method: 'DELETE' });
-          acceptState(response.state);
-          render();
-          toast('Transaction deleted.');
-        },
-      });
-      return;
-    }
-    case 'confirm-action': {
-      const fn = app.pendingConfirm;
-      if (!fn) return;
-      element.disabled = true;
-      try {
-        await fn();
-      } finally {
-        closeModal();
-      }
-      return;
-    }
-    case 'copy': {
-      const text =
-        element.dataset.copy === 'token'
-          ? app.data.settings.ingestToken
-          : `${location.origin}/api/ingest`;
-      await copyText(text);
-      return;
-    }
-    case 'rotate-token':
-      confirmModal({
-        title: 'Replace the ingest token?',
-        message: 'Any automation using the old token will stop working immediately.',
-        confirmLabel: 'New token',
-        danger: true,
-        action: async () => {
-          const response = await api('/api/token', { method: 'POST' });
-          acceptState(response.state);
-          render();
-          toast('New token created.');
-        },
-      });
-      return;
-    case 'load-demo':
-      confirmModal({
-        title: 'Load demo data?',
-        message: 'This replaces your current buckets, transactions and balances with sample data.',
-        confirmLabel: 'Load demo',
-        danger: true,
-        action: async () => {
-          const response = await api('/api/setup', { method: 'POST', body: { mode: 'demo' } });
-          acceptState(response.state);
-          app.view = 'dashboard';
-          history.replaceState(null, '', '#dashboard');
-          render();
-          toast('Demo data loaded.');
-        },
-      });
-      return;
-    case 'reset-all':
-      confirmModal({
-        title: 'Start over?',
-        message: 'This erases all your data and asks you to set up again. Download a backup first if you might want it.',
-        confirmLabel: 'Erase and start over',
-        danger: true,
-        action: async () => {
-          const response = await api('/api/reset', { method: 'POST' });
-          acceptState(response.state);
-          app.view = 'dashboard';
-          history.replaceState(null, '', '#dashboard');
-          render();
-          toast('Data reset.');
-        },
-      });
-      return;
-    default:
-      return;
-  }
-}
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    document.body.append(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    textarea.remove();
-  }
-  toast('Copied.');
-}
-
-document.addEventListener('click', async (event) => {
-  const element = event.target.closest('[data-action]');
-  if (!element) return;
-  try {
-    await handleAction(element);
-  } catch (error) {
-    toast(error.message || 'Something went wrong.', 'error');
-  }
-});
-
-document.addEventListener('click', (event) => {
-  if (event.target.classList.contains('modal-backdrop')) closeModal();
-});
-
-document.addEventListener('submit', async (event) => {
-  const form = event.target;
-  if (!form.matches('form[data-form]')) return;
-  event.preventDefault();
-
-  const submitButton = form.querySelector('button[type="submit"]');
-  const submitLabel = submitButton?.textContent;
-  if (submitButton) submitButton.disabled = true;
-
-  try {
-    if (form.dataset.form === 'setup') {
-      const data = new FormData(form);
-      const incomePaise = toPaise(data.get('income'));
-      const openingBalancePaise = toPaise(data.get('balance'));
-      if (incomePaise < 100) {
-        toast('Enter a monthly salary of at least ₹1.', 'error');
-        return;
-      }
-      if (submitButton) submitButton.textContent = 'Setting up…';
-      const response = await api('/api/setup', {
-        method: 'POST',
-        body: { mode: 'fresh', monthlyIncomePaise: incomePaise, openingBalancePaise },
-      });
-      acceptState(response.state);
-      app.view = 'dashboard';
-      app.planDirty = false;
-      history.replaceState(null, '', '#dashboard');
-      render();
-      if (response.warning) toast(response.warning, 'warn');
-      else toast("You're ready.");
-      return;
-    }
-
-    if (form.dataset.form === 'plan') {
-      const payload = collectPlan();
-      if (payload.categories.some((category) => !category.name)) {
-        toast('Give every bucket a name.', 'error');
-        return;
-      }
-      const response = await api('/api/plan', { method: 'PUT', body: payload });
-      acceptState(response.state);
-      app.planDirty = false;
-      render();
-      toast('Plan saved. It applies next month.');
-      return;
-    }
-
-    if (form.dataset.form === 'tx') {
-      const data = new FormData(form);
-      const type = data.get('tx-type');
-      const mapping = {
-        expense: { kind: 'expense', direction: 'out' },
-        income: { kind: 'income', direction: 'in' },
-        transfer: { kind: 'transfer', direction: 'out' },
-        refund: { kind: 'expense', direction: 'in' },
-        withdraw: { kind: 'transfer', direction: 'in' },
-      };
-      const body = {
-        date: data.get('date'),
-        description: data.get('description'),
-        amountPaise: toPaise(data.get('amount')),
-        direction: mapping[type].direction,
-        kind: mapping[type].kind,
-        categoryId: type === 'income' ? null : data.get('categoryId'),
-        notes: data.get('notes'),
-      };
-      const id = form.dataset.id;
-      const isNewIncome = !id && body.kind === 'income' && body.direction === 'in';
-      const response = await api(id ? `/api/transactions/${id}` : '/api/transactions', {
-        method: id ? 'PUT' : 'POST',
-        body,
-      });
-      acceptState(response.state);
-      closeModal();
-      render();
-      if (
-        isNewIncome &&
-        !response.state.derived.allocation &&
-        response.state.derived.unallocatedPaise > 0
-      ) {
-        if (response.state.derived.unallocatedPaise >= response.state.derived.plan.totalPaise) {
-          toast('Income added. Divide it to fill your buckets.');
-          openAllocateModal();
-        } else {
-          toast('Income added. Add the rest of the salary before dividing.');
-        }
-      } else if (isNewIncome && response.state.derived.unallocatedPaise > 0) {
-        toast('Income added. It is not divided yet — use Move money or wait for next month.');
-      } else {
-        toast(id ? 'Transaction updated.' : 'Transaction added.');
-      }
-      return;
-    }
-
-    if (form.dataset.form === 'reconcile') {
-      const data = new FormData(form);
-      const response = await api('/api/reconcile', {
-        method: 'POST',
-        body: { balancePaise: toPaise(data.get('balance')), note: data.get('note') },
-      });
-      acceptState(response.state);
-      closeModal();
-      render();
-      if (!response.adjustment) {
-        toast('The app already matches your bank.');
-      } else if (response.state.derived.unallocatedPaise < 0) {
-        toast(
-          `Balance matched. Your buckets are short by ${money(
-            -response.state.derived.unallocatedPaise
-          )} — move money to cover it.`,
-          'warn'
-        );
-      } else if (response.adjustment.direction === 'out') {
-        toast('Balance matched. The difference came out of Not divided.');
-      } else {
-        toast('Balance matched. The difference is now in Not divided.');
-      }
-      return;
-    }
-
-    if (form.dataset.form === 'allocate') {
-      const response = await api('/api/allocate', { method: 'POST', body: {} });
-      acceptState(response.state);
-      closeModal();
-      render();
-      toast(`${monthLabel(response.state.derived.period)} is divided.`);
-      return;
-    }
-
-    if (form.dataset.form === 'move') {
-      const data = new FormData(form);
-      const fieldFrom = data.get('fromCategoryId');
-      const fieldTo = data.get('toCategoryId');
-      const response = await api('/api/move', {
-        method: 'POST',
-        body: {
-          fromCategoryId: fieldFrom === UNALLOCATED_ID ? null : fieldFrom,
-          toCategoryId: fieldTo === UNALLOCATED_ID ? null : fieldTo,
-          amountPaise: toPaise(data.get('amount')),
-          note: data.get('note'),
-        },
-      });
-      acceptState(response.state);
-      closeModal();
-      render();
-      toast('Money moved.');
-      return;
-    }
-
-    if (form.dataset.form === 'investment-value') {
-      const data = new FormData(form);
-      const response = await api(`/api/investments/${form.dataset.id}/value`, {
-        method: 'POST',
-        body: { worthPaise: toPaise(data.get('worth')) },
-      });
-      acceptState(response.state);
-      closeModal();
-      render();
-      toast('Investment worth updated.');
-      return;
-    }
-  } catch (error) {
-    toast(error.message || 'Something went wrong.', 'error');
-  } finally {
-    if (submitButton?.isConnected) {
-      submitButton.disabled = false;
-      if (submitLabel !== undefined) submitButton.textContent = submitLabel;
-    }
-  }
-});
-
-document.addEventListener('input', (event) => {
-  if (event.target.name === 'amount' && event.target.closest('[data-form="tx"]')) {
-    updateBucketWarning();
-    return;
-  }
-  if (event.target.closest('[data-form="reconcile"]')) {
-    updateReconcilePreview();
-    return;
-  }
-  if (event.target.closest('#plan-form')) {
-    markPlanDirty();
-    updatePlanPreview();
-    return;
-  }
-  if (event.target.id === 'tx-search') {
-    app.txSearch = event.target.value;
-    applyTxFilter();
-  }
-});
-
-document.addEventListener('change', async (event) => {
-  if (event.target.id === 'restore-file') {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    try {
-      const data = JSON.parse(await file.text());
-      confirmModal({
-        title: 'Restore this backup?',
-        message: 'This replaces all current buckets, transactions and balances.',
-        confirmLabel: 'Restore backup',
-        danger: true,
-        action: async () => {
-          const response = await api('/api/restore', { method: 'POST', body: data });
-          acceptState(response.state);
-          app.view = 'dashboard';
-          app.planDirty = false;
-          history.replaceState(null, '', '#dashboard');
-          render();
-          toast('Backup restored.');
-        },
-      });
-    } catch {
-      toast('That file is not a valid Khaata backup.', 'error');
-    }
-    return;
-  }
-  if (event.target.name === 'tx-type') {
-    updateTxModalFields();
-    return;
-  }
-  if (event.target.name === 'categoryId' && event.target.closest('[data-form="tx"]')) {
-    updateTxActionLabels();
-    return;
-  }
-  if (event.target.name === 'fromCategoryId' && event.target.closest('[data-form="move"]')) {
-    const form = event.target.closest('form');
-    const toSelect = form.querySelector('[name="toCategoryId"]');
-    const notDivided = toSelect.querySelector(`option[value="${UNALLOCATED_ID}"]`);
-    if (notDivided) notDivided.disabled = event.target.value === UNALLOCATED_ID;
-    if (event.target.value === UNALLOCATED_ID && toSelect.value === UNALLOCATED_ID) {
-      const firstCategory = [...toSelect.options].find(
-        (option) => option.value !== UNALLOCATED_ID
-      );
-      if (firstCategory) toSelect.value = firstCategory.value;
-    }
-    return;
-  }
-  if (event.target.closest('#plan-form')) {
-    markPlanDirty();
-    updatePlanPreview();
-  }
-});
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && app.modalOpen) closeModal();
-});
-
-/* ------------------------------------------------------------------ */
-/* Render + boot                                                      */
-/* ------------------------------------------------------------------ */
-
+function nav(view,label,icon) { return `<button class="nav-item ${app.view===view?'active':''}" data-action="nav" data-view="${view}" aria-current="${app.view===view?'page':'false'}"><span class="nav-symbol" aria-hidden="true">${icon}</span><span>${label}</span></button>`; }
 function render() {
   if (!app.data) return;
-  const root = $('#app');
-  const scrollY = window.scrollY;
-
-  if (app.data.derived.setupRequired) {
-    root.innerHTML = setupView();
-  } else {
-    root.innerHTML = shellView();
-  }
-
-  window.scrollTo(0, scrollY);
-
-  if (app.view === 'plan' && !app.data.derived.setupRequired) {
-    updatePlanPreview();
-    if (app.planDirty) {
-      const bar = $('#savebar');
-      if (bar) bar.hidden = false;
-    }
-  }
-  if (app.view === 'transactions') {
-    applyTxFilter();
-  }
+  if (app.data.derived.setupRequired) { $('#app').innerHTML = setupView(); return; }
+  const navs = nav('dashboard','Overview','◫')+nav('plan','Plan','≡')+nav('transactions','Activity','↔')+nav('settings','Settings','⚙');
+  $('#app').innerHTML = `<div class="shell"><aside class="sidebar">${brand()}<nav class="nav">${navs}</nav><div class="sidebar-foot">${button('How it works','help')}<p class="fine">Local & private</p></div></aside><main class="main"><header class="mobile-head">${brand()}${button('+ Expense','expense','','primary small')}</header><div class="view">${app.view==='plan'?planView():app.view==='transactions'?activityView():app.view==='settings'?settingsView():dashboardView()}</div></main><nav class="bottom-nav">${navs}</nav></div>`;
+  if (app.view === 'plan') updatePlanTotal();
+  if (app.view === 'transactions') filterActivity();
+}
+function pageHead(title, sub = '', action = '') { return `<div class="page-head"><div><p class="eyebrow">${esc(sub)}</p><h1>${title}</h1></div>${action}</div>`; }
+function monthPicker() { return `<label class="month-picker"><span class="sr-only">Budget month</span><select data-control="month">${monthOptions(app.period)}</select></label>`; }
+function stat(label,value) { return `<div class="stat"><span class="stat-label">${label}</span><strong class="stat-value">${money(value)}</strong></div>`; }
+function notice() {
+  const d=app.data.derived, s=d.safety;
+  if (app.data.settings.planConfirmed === false) return `<div class="notice warn"><strong>Make this plan yours.</strong>${button('Review plan','nav','data-view="plan"','primary')}</div>`;
+  if (historical()) return `<div class="notice quiet"><span>History for ${monthName(app.period)}</span>${button('Back to this month','this-month')}</div>`;
+  if (s.uncoveredPaise > 0) return `<div class="notice danger"><strong>${money(s.uncoveredPaise)} of your buckets needs covering.</strong>${button('Cover shortage','move','','ghost')}</div>`;
+  if (s.billGapPaise > 0 && d.allocation) return `<div class="notice warn"><strong>Bills need ${money(s.billGapPaise)} more.</strong>${button('Move money','move')}</div>`;
+  if (!d.allocation) return `<div class="notice warn"><span>Your ${monthName(app.period).split(' ')[0]} budget is ready to fund.</span>${button('Fund month','fund','','primary')}</div>`;
+  if (d.allocation.remainingPaise > 0) return `<div class="notice warn"><span>${money(d.allocation.remainingPaise)} of the plan is still unfunded.</span>${button('Top up','fund','','primary')}</div>`;
+  if (d.unallocatedPaise > 0) return `<div class="notice quiet"><span>${money(d.unallocatedPaise)} is unassigned.</span>${button('Assign money','move')}</div>`;
+  return '';
+}
+function dashboardView() {
+  const d=app.data.derived, s=d.safety;
+  const targets=new Map((d.allocation?.items || d.plan.items).filter(i=>i.reason!=='surplus').map(i=>[i.categoryId,i.targetPaise]));
+  const commitments = new Map(d.commitments.map(c=>[c.categoryId,c]));
+  return `${pageHead('Your money','Overview',monthPicker())}<section class="hero clean-hero"><div><p class="eyebrow light">${app.period>currentMonth()?'Planned spending':'Available to spend'}</p><h1 class="balance">${money(s.safeToSpendPaise)}</h1><p class="hero-sub">${historical()?'At month end':app.period>currentMonth()?`Reserved for ${monthName(app.period)}`:`${money(s.dailyPaise)} / day until payday · ${s.daysToPayday} days`}</p></div><div class="hero-actions">${button('+ Expense','expense','','primary light')}${button('+ Income','income','','hero-ghost')}</div><div class="bank-line">Bank balance <strong>${money(d.bankBalancePaise)}</strong>${s.futureReservedPaise?`<span class="future-reserve">${money(s.futureReservedPaise)} reserved for next month</span>`:''}</div></section>${notice()}<div class="stats">${stat('Reserved',s.reservedPaise)}${stat('Spent this month',d.summary.grossSpentPaise)}${stat('Unassigned',d.unallocatedPaise)}</div><section class="panel"><div class="panel-head"><h2>Bills & goals</h2>${button('Edit plan','nav','data-view="plan"','small ghost')}</div><div class="commitment-list">${active().filter(c=>type(c)!=='spending').map(c=>commitmentRow(c,commitments.get(c.id))).join('') || '<p class="empty">No fixed commitments.</p>'}</div></section><section class="spending-section"><div class="panel-head"><h2>Everyday spending</h2>${button('Move money','move','','small ghost')}</div><div class="envelope-grid">${active().filter(c=>type(c)==='spending').map(c=>spendingCard(c,targets.get(c.id)||0)).join('')}</div></section>${investmentView()}<div class="overview-bottom">${button('Check bank balance','reconcile')}${button('View activity','nav','data-view="transactions"')}</div>`;
+}
+function commitmentRow(c, commitment) {
+  const t=type(c), status=commitment?.status, done=status==='done';
+  let label = done ? (t==='investment'?'Invested':t==='saving'?'Saved':'Paid') : status==='at-goal'?'Goal reached': t==='saving'?`${money(commitment?.remainingPaise)} to save`:t==='investment'?`${money(commitment?.remainingPaise)} to invest`:`${money(commitment?.remainingPaise)} due`;
+  if (commitment?.overduePaise) label += ` · ${money(commitment.overduePaise)} overdue`;
+  if (!commitment?.targetPaise && status!=='done') label='No monthly target';
+  const action=t==='bill'||t==='loan'?'Pay':t==='investment'?'Invest':'Transfer';
+  return `<div class="commitment-row"><span class="env-icon sm" style="background:${esc(c.color)}16">${esc(c.icon)}</span><button class="row-name" data-action="bucket" data-id="${c.id}"><strong>${esc(c.name)}</strong><small class="${done||status==='at-goal'?'status-done':commitment?.overduePaise?'negative':''}">${done?'✓ ':''}${label}${commitment?.dueDate&&!done?` · ${new Date(`${commitment.dueDate}T12:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}`:''}</small></button><div class="row-money"><strong>${money(c.balancePaise)}</strong><small>reserved</small></div>${button(action,'expense',`data-id="${c.id}"`,'small ghost')}</div>`;
+}
+function spendingCard(c,target) {
+  const over=c.balancePaise<0;
+  return `<article class="env-card ${over?'is-over':''}" style="--accent:${esc(c.color)}"><div class="env-head"><span class="env-icon sm" style="background:${esc(c.color)}16">${esc(c.icon)}</span><button class="row-name" data-action="bucket" data-id="${c.id}"><strong>${esc(c.name)}</strong></button><button class="icon-btn add" data-action="expense" data-id="${c.id}" aria-label="Add ${esc(c.name)} expense">+</button></div><div class="env-amount">${money(c.balancePaise)}</div><div class="env-target">${over?'Over budget':`${money(target)} monthly`}</div><div class="bar"><span style="width:${target?Math.min(100,Math.max(0,c.balancePaise/target*100)):0}%;background:${esc(c.color)}"></span></div>${over?button('Cover overspend','move',`data-to="${c.id}"`,'small ghost'):''}</article>`;
+}
+function investmentView() {
+  const investments=app.data.derived.investments;
+  if (!investments.length || historical()) return '';
+  return `<details class="panel investment-details"><summary><strong>Investments</strong><span>${investments.length} holding${investments.length===1?'':'s'}</span></summary><div>${investments.map(i=>`<div class="investment-row"><div><strong>${esc(i.name)}${i.archived?' · paused':''}</strong><small>${i.worthStale?'Update value after the last movement':i.gainPaise==null?'Gain unavailable · opening history needed':`${i.gainPaise>=0?'+':''}${money(i.gainPaise)} gain / loss`}</small></div><strong>${i.worthPaise==null?'—':money(i.worthPaise)}</strong>${button('Update','worth',`data-id="${i.categoryId}"`,'small ghost')}</div>`).join('')}</div></details>`;
+}
+function planView() {
+  const s=app.data.settings;
+  return `${pageHead('Your monthly plan','Plan')}${s.planConfirmed===false?'<div class="notice warn">Review the amounts before funding your first month.</div>':''}<form data-form="plan" id="plan-form"><div class="plan-controls">${amountField('Expected take-home salary','income',rupees(s.monthlyIncomePaise))}<label class="field"><span>Payday</span><input name="payday" type="number" min="1" max="31" value="${s.paydayDay}" required></label></div><div id="plan-summary" class="plan-summary"></div>${[['bill','Bills'],['loan','Loans'],['saving','Savings'],['investment','Investments'],['spending','Everyday spending']].map(([t,label])=>`<section class="plan-section"><div class="plan-section-head"><h2>${label}</h2>${button('+ Add','add-row',`data-type="${t}"`,'small ghost')}</div><div data-plan-type="${t}">${active().filter(c=>type(c)===t).map(planRow).join('')}</div></section>`).join('')}<details class="panel plan-advanced"><summary>Extra money</summary><label class="field"><span>Send surplus to</span><select name="surplus"><option value="">Keep unassigned</option>${active().filter(c=>['saving','investment'].includes(type(c))).map(c=>`<option value="${c.id}" ${s.surplusCategoryId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label></details><div class="plan-save"><p class="fine">Applies when you next fund a month. Existing budgets keep their plan.</p><button class="btn primary" type="submit">Save plan</button></div></form>`;
+}
+function planRow(c) {
+  const optionsId=`options-${c.id||Math.random().toString(36).slice(2,9)}`;
+  const t=type(c), fixed=t!=='spending', paid=(app.data.billOverrides||[]).some(b=>b.categoryId===c.id&&b.period===app.period&&b.settled);
+  return `<div class="plan-line" data-cat="${esc(c.id||'')}" data-type="${t}" data-icon="${esc(c.icon||'🏷️')}" data-color="${esc(c.color||'#23735f')}"><div class="plan-line-main"><input name="name" value="${esc(c.name||'')}" placeholder="Name" maxlength="40" aria-label="Bucket name" required><div class="money-input"><span>${fixed?'₹':'%'}</span><input name="${fixed?'target':'percent'}" value="${fixed?rupees(c.targetPaise||0):c.percent||0}" type="number" min="0" ${fixed?'':'max="100"'} step="0.01" inputmode="decimal" aria-label="${fixed?'Monthly amount':'Spending share'}" required></div><button class="icon-btn" type="button" data-action="row-options" aria-controls="${optionsId}" aria-expanded="false" aria-label="Options for ${esc(c.name||'bucket')}">⋯</button></div><details id="${optionsId}"><summary hidden>Options</summary><div class="plan-options"><label class="check"><input name="rollover" type="checkbox" ${c.rollover?'checked':''}>Keep leftover</label>${amountField('Maximum balance','cap',rupees(c.capPaise),false)}${['bill','loan'].includes(t)?`<label class="field"><span>Due day</span><input name="dueDay" type="number" min="1" max="31" value="${c.dueDay||''}"></label>${app.data.settings.planConfirmed===false?`<label class="check"><input name="alreadyPaid" type="checkbox" ${paid?'checked':''}>Already paid this month</label>`:''}`:''}${button('Remove bucket','remove-row',c.balancePaise?'disabled title="Move the balance first"':'','small ghost')}</div></details></div>`;
+}
+function collectPlan() {
+  const f=$('#plan-form');
+  return {monthlyIncomePaise:paise(f.elements.income.value),paydayDay:Number(f.elements.payday.value),surplusCategoryId:f.elements.surplus.value||null,period:app.period,categories:$$('.plan-line',f).map(row=>({
+    id:row.dataset.cat||undefined,kind:row.dataset.type==='spending'?'flex':'fixed',type:row.dataset.type,name:$('[name=name]',row).value.trim(),targetPaise:$('[name=target]',row)?paise($('[name=target]',row).value):0,percent:Number($('[name=percent]',row)?.value||0),rollover:$('[name=rollover]',row).checked,capPaise:$('[name=cap]',row).value===''?null:paise($('[name=cap]',row).value),dueDay:Number($('[name=dueDay]',row)?.value)||null,alreadyPaid:Boolean($('[name=alreadyPaid]',row)?.checked),icon:row.dataset.icon,color:row.dataset.color
+  }))};
+}
+function updatePlanTotal() {
+  const f=$('#plan-form'); if (!f) return;
+  const p=collectPlan(), fixed=p.categories.reduce((n,c)=>n+c.targetPaise,0), share=p.categories.reduce((n,c)=>n+c.percent,0);
+  const valid=p.monthlyIncomePaise>0&&fixed<=p.monthlyIncomePaise&&(!p.categories.some(c=>c.kind==='flex')||Math.abs(share-100)<0.001);
+  $('#plan-summary').innerHTML=`<div class="plan-totals"><span>Fixed <strong>${money(fixed)}</strong></span><span>Spending <strong>${money(Math.max(0,p.monthlyIncomePaise-fixed))}</strong></span><span class="${valid?'':'negative'}">Shares <strong>${Number(share.toFixed(2))}%</strong></span></div>${!valid?'<p class="negative">Fixed amounts must fit your salary. Spending shares must total 100%.</p>':''}`;
+  $('button[type=submit]',f).disabled=!valid;
+}
+function activityView() {
+  const rows=[];
+  for (const t of app.data.transactions.filter(t=>t.date.startsWith(app.period))) rows.push({key:`${t.date}${t.createdAt}`,date:t.date,label:t.description,detail:cat(t.categoryId)?.name|| (t.kind==='adjustment'?'Balance correction':'Income'),amount:(t.direction==='in'?1:-1)*t.amountPaise,kind:t.kind,id:t.id,action:'edit'});
+  for (const m of app.data.moves.filter(m=>(m.date||m.createdAt).startsWith(app.period))) rows.push({key:`${m.date||m.createdAt.slice(0,10)}${m.createdAt}`,date:m.date||m.createdAt.slice(0,10),label:`${cat(m.fromCategoryId)?.name||'Unassigned'} → ${cat(m.toCategoryId)?.name||'Unassigned'}`,detail:m.note||'Budget move',amount:m.amountPaise,kind:'budget',id:m.id,action:'move-detail'});
+  for (const a of app.data.allocations.filter(a=>a.period===app.period)) for (const f of a.fundings||[{date:a.createdAt.slice(0,10),createdAt:a.createdAt}]) rows.push({key:`${f.date}${f.createdAt}`,date:f.date,label:`Funded ${monthName(a.period)}`,detail:'Budget allocation',amount:null,kind:'budget',id:a.id,action:'allocation-detail'});
+  rows.sort((a,b)=>b.key.localeCompare(a.key));
+  return `${pageHead('Activity','History',monthPicker())}<div class="activity-tools"><input type="search" data-control="search" value="${esc(app.search)}" placeholder="Search activity" aria-label="Search activity"><select data-control="filter" aria-label="Activity type">${[['all','Everything'],['expense','Spending'],['income','Income'],['transfer','Investments & transfers'],['budget','Budget changes']].map(([v,l])=>`<option value="${v}" ${app.filter===v?'selected':''}>${l}</option>`).join('')}</select>${button('+ Add','expense','','primary')}</div><div class="panel activity-list">${rows.map(r=>`<button class="activity-row" data-action="${r.action}" data-id="${r.id}" data-kind="${r.kind}" data-search="${esc(`${r.label} ${r.detail}`.toLowerCase())}"><span class="activity-icon">${r.kind==='budget'?'↔':r.amount>0?'↙':'↗'}</span><span class="activity-description"><strong>${esc(r.label)}</strong><small>${new Date(`${r.date}T12:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short'})} · ${esc(r.detail)}</small></span><strong class="${r.kind!=='budget'&&r.amount>0?'positive':''}">${r.amount==null?'—':`${r.kind==='budget'?'':r.amount>0?'+':'−'}${money(Math.abs(r.amount))}`}</strong></button>`).join('')}<div class="empty" id="activity-empty">No activity in this view.</div></div>`;
+}
+function filterActivity() {
+  let count=0; for (const row of $$('.activity-row')) { row.hidden=!(app.filter==='all'||row.dataset.kind===app.filter)||!row.dataset.search.includes(app.search.toLowerCase()); if (!row.hidden) count++; }
+  const empty=$('#activity-empty'); if(empty) empty.hidden=count>0;
+}
+function settingsView() {
+  const s=app.data.settings;
+  return `${pageHead('Settings','Your app')}<div class="settings-grid"><section class="panel"><div class="panel-head"><h2>Your data</h2></div><div class="settings-buttons"><a class="btn ghost" href="/api/export">Download backup</a><label class="btn ghost">Restore backup<input id="restore-file" type="file" accept=".json" hidden></label>${button('Check bank balance','reconcile')}</div></section><section class="panel"><div class="panel-head"><h2>Need a hand?</h2></div>${button('How Khaata works','help')}</section><details class="panel"><summary>Automatic updates</summary><p class="hint">Optional local alert endpoint.</p><label class="field"><span>Endpoint</span><input readonly value="${esc(location.origin)}/api/ingest"></label><label class="field"><span>Token</span><input readonly value="${esc(s.ingestToken)}"></label>${button('Replace token','token')}</details><details class="panel"><summary>Start over</summary><div class="settings-buttons">${button('Load example','demo')}${button('Erase data','reset','','danger')}</div></details></div>`;
 }
 
-async function init() {
-  app.view = viewFromHash();
+const txMapping={expense:{kind:'expense',direction:'out'},income:{kind:'income',direction:'in'},transfer:{kind:'transfer',direction:'out'},refund:{kind:'expense',direction:'in'},withdraw:{kind:'transfer',direction:'in'}};
+const txType=t=>t.kind==='income'?'income':t.kind==='transfer'?(t.direction==='in'?'withdraw':'transfer'):(t.direction==='in'?'refund':'expense');
+function openTransaction({id, categoryId, income=false, adjustmentId}={}) {
+  const t=id?app.data.transactions.find(t=>t.id===id):null;
+  if (t?.kind==='adjustment') { openCorrection(t); return; }
+  const adjustment=adjustmentId?app.data.transactions.find(t=>t.id===adjustmentId):null;
+  const category=cat(t?.categoryId||categoryId), initial=t?txType(t):income?'income':category&&['saving','investment','loan'].includes(type(category))?'transfer':'expense';
+  modal(t?'Edit transaction':adjustment?'Identify balance difference':'Add transaction',`<form data-form="tx" data-id="${id||''}" data-adjustment="${adjustmentId||''}"><div class="form-grid"><label class="field"><span>Type</span><select name="txType">${[['expense','Expense'],['income','Income'],['transfer','Money moved out'],['refund','Refund'],['withdraw','Withdrawal']].filter(([v])=>!adjustment||txMapping[v].direction===adjustment.direction).map(([v,l])=>`<option value="${v}" ${v===(adjustment?.direction==='in'?'income':initial)?'selected':''}>${l}</option>`).join('')}</select></label>${amountField('Amount','amount',rupees(t?.amountPaise??adjustment?.amountPaise))}</div><label class="field"><span>Description</span><input name="description" value="${esc(t?.description||'')}" maxlength="120" placeholder="e.g. Groceries" required></label><label class="field" data-field="category"><span>Bucket</span><select name="categoryId" data-selected="${esc(category?.id||'')}"></select></label><div class="form-grid"><label class="field"><span>Date</span><input name="date" type="date" value="${t?.date||today()}" min="${app.data.settings.openingDate||''}" max="${today()}" required></label><label class="field"><span>Budget month</span><input name="budgetPeriod" type="month" value="${t?.budgetPeriod||t?.date.slice(0,7)||app.period}" required></label></div><label class="check" data-field="settled" hidden><input name="settled" type="checkbox" ${!t|| (app.data.billOverrides||[]).some(b=>b.categoryId===t.categoryId&&b.period===(t.budgetPeriod||t.date.slice(0,7))&&b.settled)?'checked':''}>This bill is fully paid</label><p class="hint bucket-warning" data-warning hidden></p><div class="hint bucket-warning" data-correction-match hidden></div><details class="form-details"><summary>Note</summary><input name="notes" value="${esc(t?.notes||'')}" maxlength="300" aria-label="Note"></details>${id?`<div class="transaction-tools">${button('Delete','delete-tx',`data-id="${id}"`,'small ghost')}${t.direction==='out'&&t.kind==='transfer'&&!t.reversalOf?button('Payment failed / returned','reverse',`data-id="${id}"`,'small ghost'):''}</div>`:''}${actions(adjustment?'Classify difference':t?'Save changes':'Save transaction')}</form>`);
+  updateTransactionFields();
+}
+function updateTransactionFields() {
+  const f=$('[data-form=tx]'); if(!f)return;
+  const k=f.elements.txType.value, select=f.elements.categoryId;
+  const selected=select.value||select.dataset.selected;
+  const allowed=app.data.categories.filter(c=>(!c.archived||c.id===selected)&&(['expense','refund'].includes(k)?['bill','spending'].includes(type(c)):['saving','investment','loan'].includes(type(c))));
+  $('[data-field=category]',f).hidden=k==='income'; select.required=k!=='income'; select.disabled=k==='income';
+  select.innerHTML=allowed.map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${esc(c.name)} · ${money(c.balancePaise)}</option>`).join('');
+  if (!allowed.some(c=>c.id===selected)) {
+    const preferred=k==='transfer'?allowed.find(c=>type(c)==='investment'):k==='withdraw'?allowed.find(c=>type(c)==='saving'):allowed.find(c=>c.id==='misc');
+    if(preferred)select.value=preferred.id;
+  }
+  select.dataset.selected=select.value;
+  const c=cat(select.value), bill=c&&['bill','loan'].includes(type(c))&&txMapping[k].direction==='out';
+  $('[data-field=settled]',f).hidden=!bill;
+  updateTransactionWarning();
+}
+function updateTransactionWarning() {
+  const f=$('[data-form=tx]');if(!f)return;
+  const c=cat(f.elements.categoryId.value), k=f.elements.txType.value, warning=$('[data-warning]',f), amount=paise(f.elements.amount.value||0);
+  let balance=c?.balancePaise||0;
+  const old=app.data.transactions.find(t=>t.id===f.dataset.id);
+  if(old?.categoryId===c?.id)balance-=(old.direction==='in'?1:-1)*old.amountPaise;
+  const gap=amount-balance;
+  warning.hidden=!c||txMapping[k].direction==='in'||k==='income'||gap<=0;
+  warning.textContent=`${c?.name||'This bucket'} will be ${money(gap)} short. You can cover it with Move money.`;
+  const match=$('[data-correction-match]',f);
+  const correction=!f.dataset.id&&!f.dataset.adjustment&&app.data.transactions.find(t=>t.kind==='adjustment'&&t.amountPaise===amount&&t.direction===txMapping[k].direction);
+  match.hidden=!correction;
+  if(correction)match.innerHTML=`This amount matches an unidentified balance correction. ${button('Use that correction','classify',`data-id="${correction.id}"`,'small ghost')}`;
+}
+function openCorrection(t) {
+  modal('Balance correction',`<p class="big-money">${t.direction==='in'?'+':'−'}${money(t.amountPaise)}</p><p class="hint">Identify this difference without changing your bank balance again.</p><div class="settings-buttons">${button('Identify transaction','classify',`data-id="${t.id}"`,'primary')}${button('Delete correction','delete-tx',`data-id="${t.id}"`,'ghost')}</div>`);
+}
+function openFunding() {
+  const d=app.data.derived, p=d.fundingPreview;
+  if (historical()) { toast('Choose this month or next month to fund.',true);return; }
+  if(app.data.settings.planConfirmed===false){navigate('plan');return;}
+  if(p.legacy){toast('Use Move money to adjust this existing budget.');return;}
+  modal(d.allocation?'Top up month':'Fund month',`<form data-form="fund"><label class="field"><span>Budget month</span><select data-control="fund-month">${monthOptions(app.period, true)}</select></label><div class="fund-summary"><span>Unassigned</span><strong>${money(d.unallocatedPaise)}</strong></div>${p.shortfallPaise?`<p class="hint">The full plan needs ${money(p.shortfallPaise)} more. Essentials are funded first.</p>`:''}${p.error?`<p class="negative">${esc(p.error)}</p>`:''}<div class="fund-preview">${p.items.map(i=>`<div><span>${esc(i.name)}</span><strong>${money(i.afterPaise)}</strong></div>`).join('')}</div><p class="fine">Balances after funding. Your bank total stays the same.</p>${actions(d.allocation?'Top up':p.shortfallPaise?'Fund what I have':'Fund month')}</form>`);
+}
+function openMove(toId) {
+  const d=app.data.derived, positives=active().filter(c=>c.balancePaise>0);
+  const sources=[...(d.unallocatedPaise>0?[{id:'',name:'Unassigned',balancePaise:d.unallocatedPaise}]:[]),...positives.filter(c=>type(c)==='spending'),...positives.filter(c=>type(c)!=='spending')];
+  if(!sources.length){toast('No funded money is available to move.',true);return;}
+  const target=cat(toId), from=sources.find(c=>c.id!==toId), to=toId|| (d.unallocatedPaise<0?'':active().find(c=>c.balancePaise<0&&c.id!==from?.id)?.id||active().find(c=>c.id!==from?.id)?.id||'');
+  modal('Move money',`<form data-form="move"><div class="form-grid"><label class="field"><span>From</span><select name="from">${sources.map(c=>`<option value="${c.id}" ${c.id===from?.id?'selected':''}>${esc(c.name)} · ${money(c.balancePaise)}</option>`).join('')}</select></label><label class="field"><span>To</span><select name="to"><option value="" ${to===''?'selected':''}>Unassigned</option>${active().map(c=>`<option value="${c.id}" ${c.id===to?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label></div>${amountField('Amount','amount',target?.balancePaise<0?rupees(Math.min(from?.balancePaise||0,-target.balancePaise)):'')}<p class="hint bucket-warning" data-move-warning hidden></p><label class="field"><span>Note <em>optional</em></span><input name="note" maxlength="160"></label>${actions('Move money')}</form>`);updateMoveWarning();
+}
+function updateMoveWarning() {
+  const f=$('[data-form=move]');if(!f)return;const c=cat(f.elements.from.value), amount=paise(f.elements.amount.value||0), warning=$('[data-move-warning]',f);
+  warning.hidden=!c||type(c)==='spending';
+  warning.textContent=c?`${c.name} will have ${money(c.balancePaise-amount)} reserved. This reduces money set aside for ${['bill','loan'].includes(type(c))?'payments':type(c)==='investment'?'investing':'saving'}.`:'';
+}
+function openBucket(id) {
+  const c=cat(id), commitment=app.data.derived.commitments.find(i=>i.categoryId===id);
+  const row=app.data.derived.allocation?.items.find(i=>i.categoryId===id&&i.reason==='target');
+  modal(c.name,`<p class="big-money">${money(c.balancePaise)}</p><dl class="kv"><div><dt>Leftover</dt><dd>${c.rollover?'Kept next month':'Unused money is released next month'}</dd></div>${c.capPaise!=null?`<div><dt>Maximum</dt><dd>${money(c.capPaise)}</dd></div>`:''}${row?.carryPaise?`<div><dt>Carried forward</dt><dd>${money(row.carryPaise)}</dd></div>`:''}</dl>${commitment&&['bill','loan'].includes(type(c))?`<form data-form="bill" data-id="${id}"><div class="form-grid"><label class="field"><span>Bill month</span><input name="period" type="month" value="${app.period}" required></label>${amountField('Actual bill / EMI','amount',rupees(commitment.targetPaise))}</div><label class="check"><input name="settled" type="checkbox" ${commitment.status==='done'?'checked':''}>Fully paid / already included in opening balance</label><p class="fine">Updates the bill status. Log new payments as transactions.</p>${actions('Update bill')}</form>`:button('Move money','move',`data-to="${id}"`)} `);
+}
+function openWorth(id) {
+  const i=app.data.derived.investments.find(i=>i.categoryId===id), c=cat(id);
+  const history=c.historyConfirmed?(i.historyComplete?(i.openingCostPaise?'existing':'new'):'unknown'):'';
+  modal(`Update ${i.name}`,`<form data-form="worth" data-id="${id}">${amountField('Current value','worth',rupees(i.worthPaise))}<details class="form-details" ${!c.historyConfirmed?'open':''}><summary>Opening history</summary><label class="field"><span>Before using Khaata</span><select name="history" required><option value="" disabled ${!history?'selected':''}>Choose once</option><option value="new" ${history==='new'?'selected':''}>I had no investments here</option><option value="existing" ${history==='existing'?'selected':''}>I already held investments</option><option value="unknown" ${history==='unknown'?'selected':''}>I'm not sure</option></select></label><div data-opening-cost ${history!=='existing'?'hidden':''}>${amountField('Cost of opening holdings','cost',i.openingCostPaise?rupees(i.openingCostPaise):'',false)}<p class="fine">What you paid for holdings you owned when you started. Leave blank if unknown.</p></div></details>${actions('Save value')}</form>`);
+}
+
+function openReconcile() {
+  modal('Check bank balance',`<form data-form="reconcile">${amountField('Balance in your bank app','balance',rupees(app.data.derived.bankBalancePaise))}<p class="hint">A difference stays unidentified until you classify it.</p>${actions('Compare & match')}</form>`);
+}
+function help() {
+  modal('How Khaata works',`<div class="help-steps"><div class="help-step"><span>1</span><div><strong>Make a plan</strong><p>Set bills and goals, then split the rest across spending.</p></div></div><div class="help-step"><span>2</span><div><strong>Fund a month</strong><p>Log salary, choose the month it supports, and fund it. Smaller salaries can fund essentials first.</p></div></div><div class="help-step"><span>3</span><div><strong>Log money as it moves</strong><p>Record expenses, investments and refunds. A budget move changes labels; it never changes your bank total.</p></div></div></div><details><summary>Available to spend</summary><p>Your funded spending money after protecting bills and goals. A negative bucket still needs covering.</p></details><details><summary>Starting midway through a month</summary><p>The opening balance already includes older transactions. Mark bills already paid under Plan options or the bill details. Only log money that moves after your starting date.</p></details><details><summary>Correcting missing entries</summary><p>If you matched your bank balance earlier, identify that correction from Activity. This avoids counting the same money twice.</p></details><details><summary>Bills and leftovers</summary><p>Unpaid bills stay due next month. Mark a variable bill fully paid when settled, even if it cost less than planned. Spending overshoots carry forward.</p></details><details><summary>Investments</summary><p>Reserved cash is separate from the value of your holdings. Update values manually. For failed payments, use Payment failed / returned. Pause a SIP by setting its monthly amount to zero.</p></details>`);
+}
+function navigate(view) {
+  if(app.dirty&&!confirm('Discard unsaved plan changes?'))return;
+  app.dirty=false;close();app.view=view;location.hash=view;render();window.scrollTo(0,0);
+}
+async function selectMonth(period) { if(app.dirty&&!confirm('Discard unsaved plan changes?'))return;app.dirty=false;app.period=period;sessionStorage.setItem('khaata-month',period);await refresh(); }
+async function handleAction(el) {
+  const id=el.dataset.id;
+  switch(el.dataset.action) {
+    case 'nav':navigate(el.dataset.view);break;
+    case 'close':close();break;
+    case 'this-month':await selectMonth(currentMonth());break;
+    case 'expense':openTransaction({categoryId:id});break;
+    case 'income':openTransaction({income:true});break;
+    case 'edit':openTransaction({id});break;
+    case 'classify':openTransaction({adjustmentId:id});break;
+    case 'fund':openFunding();break;
+    case 'move':openMove(el.dataset.to);break;
+    case 'bucket':openBucket(id);break;
+    case 'worth':openWorth(id);break;
+    case 'reconcile':openReconcile();break;
+    case 'help':help();break;
+    case 'add-row': {
+      const t=el.dataset.type; $(`[data-plan-type="${t}"]`).insertAdjacentHTML('beforeend',planRow({type:t,rollover:['saving','investment'].includes(t),balancePaise:0,capPaise:null}));app.dirty=true;updatePlanTotal();break;
+    }
+    case 'row-options':{const details=el.closest('.plan-line').querySelector('details');details.open=!details.open;el.setAttribute('aria-expanded',String(details.open));break;}
+    case 'remove-row':el.closest('.plan-line').remove();app.dirty=true;updatePlanTotal();break;
+    case 'delete-tx':if(confirm('Delete this entry and reverse its effect?')){await change(`/api/transactions/${id}`,undefined,'DELETE');close();render();toast('Entry deleted.');}break;
+    case 'reverse':if(confirm('Record money returned from this failed payment?')){await change(`/api/transactions/${id}/reverse`,{});close();render();toast('Payment reversed.');}break;
+    case 'allocation-detail': {
+      const a=app.data.allocations.find(a=>a.id===id);
+      modal(`Budget · ${monthName(a.period)}`,`<div class="fund-preview">${a.items.filter(i=>i.reason==='target').map(i=>`<div><span>${esc(cat(i.categoryId)?.name||'Bucket')}</span><strong>${money(i.fundedPaise??i.deltaPaise)}</strong></div>`).join('')}</div>${app.data.derived.allocation?.id===id&&app.data.derived.allocation.canUndo?button('Undo funding','undo',`data-id="${id}"`):'<p class="fine">Adjust this budget with Move money.</p>'}`);break;
+    }
+    case 'move-detail': {
+      const m=app.data.moves.find(m=>m.id===id);modal('Budget move',`<p>${esc(cat(m.fromCategoryId)?.name||'Unassigned')} → ${esc(cat(m.toCategoryId)?.name||'Unassigned')}</p><p class="big-money">${money(m.amountPaise)}</p><p>${esc(m.note)}</p>`);break;
+    }
+    case 'undo':if(confirm('Undo this month’s funding?')){await change(`/api/allocations/${id}/undo`,{});close();render();toast('Funding undone.');}break;
+    case 'demo':if(!app.data.derived.setupRequired&&!confirm('Replace your data with an example? Download a backup first.'))return;await change('/api/setup',{mode:'demo'});app.view='dashboard';app.period=currentMonth();close();await refresh();break;
+    case 'reset':if(confirm('Erase all data? Download a backup first.')){await change('/api/reset',{});app.period=currentMonth();sessionStorage.setItem('khaata-month',app.period);app.dirty=false;close();render();}break;
+    case 'token':if(confirm('Replace the token? Existing automations will need the new one.')){await change('/api/token',{});render();toast('Token replaced.');}break;
+  }
+}
+document.addEventListener('click',async event=>{
+  const el=event.target.closest('[data-action]');
+  if(!el){if(event.target.classList.contains('modal-backdrop')&&!app.busy)close();return;}
+  if(app.busy)return;
+  try {app.busy=true;await handleAction(el);}catch(error){toast(error.message,true);}finally{app.busy=false;}
+});
+document.addEventListener('submit',async event=>{
+  const f=event.target;if(!f.matches('[data-form]'))return;event.preventDefault();if(app.busy)return;
+  const submit=$('button[type=submit]',f)||$('button:not([type])',f);if(submit)submit.disabled=true;
+  app.busy=true;
   try {
-    await load();
-  } catch (error) {
-    $('#app').innerHTML = fatalView(error);
-  }
-
-  setInterval(async () => {
-    if (app.modalOpen || app.planDirty || document.visibilityState !== 'visible') return;
-    const active = document.activeElement;
-    if (active && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)) return;
-    try {
-      const response = await api('/api/state');
-      if (JSON.stringify(response.state) !== app.lastStateJson) {
-        acceptState(response.state);
-        render();
-      }
-    } catch {
-      /* keep the current screen if the server blips */
+    const data=new FormData(f), form=f.dataset.form;
+    if(form==='setup'){
+      if(paise(data.get('income'))<=0)throw new Error('Enter your expected monthly salary.');
+      await change('/api/setup',{mode:'fresh',monthlyIncomePaise:paise(data.get('income')),openingBalancePaise:paise(data.get('balance')),openingDate:data.get('openingDate')});app.period=currentMonth();sessionStorage.setItem('khaata-month',app.period);app.view='plan';location.hash='plan';render();
+    } else if(form==='plan'){
+      await change('/api/plan',collectPlan(),'PUT');app.dirty=false;app.view='dashboard';location.hash='dashboard';render();toast('Plan saved.');
+    } else if(form==='tx'){
+      const mapping=txMapping[data.get('txType')], c=cat(data.get('categoryId'));
+      const body={...mapping,amountPaise:paise(data.get('amount')),description:data.get('description'),date:data.get('date'),budgetPeriod:data.get('budgetPeriod'),categoryId:mapping.kind==='income'?null:data.get('categoryId'),notes:data.get('notes'),adjustmentId:f.dataset.adjustment||undefined};
+      if(c&&['bill','loan'].includes(type(c))&&mapping.direction==='out')body.settleBill=data.get('settled')==='on';
+      const response=await change(f.dataset.id?`/api/transactions/${f.dataset.id}`:'/api/transactions',body,f.dataset.id?'PUT':'POST');
+      close();render();toast('Transaction saved.');
+      if(!f.dataset.id&&!f.dataset.adjustment&&mapping.kind==='income'&&body.budgetPeriod>=currentMonth()&&app.data.derived.periods.includes(body.budgetPeriod)&&body.budgetPeriod!==app.period)await selectMonth(body.budgetPeriod);
+      if(!f.dataset.id&&mapping.kind==='income'&&(!app.data.derived.allocation||app.data.derived.allocation.remainingPaise>0))openFunding();
+    } else if(form==='fund'){
+      await change('/api/allocate',{period:app.period,partial:Boolean(app.data.derived.allocation)||Boolean(app.data.derived.fundingPreview.shortfallPaise)});close();render();toast('Budget funded.');
+    } else if(form==='move'){
+      await change('/api/move',{fromCategoryId:data.get('from')||null,toCategoryId:data.get('to')||null,amountPaise:paise(data.get('amount')),note:data.get('note'),period:app.period});close();render();toast('Money moved.');
+    } else if(form==='bill'){
+      await change(`/api/bills/${f.dataset.id}`,{period:data.get('period'),amountPaise:paise(data.get('amount')),settled:data.get('settled')==='on'});close();render();toast('Bill updated.');
+    } else if(form==='worth'){
+      await change(`/api/investments/${f.dataset.id}/value`,{worthPaise:paise(data.get('worth')),openingCostPaise:data.get('history')==='new'?0:data.get('history')==='existing'&&data.get('cost')!==''?paise(data.get('cost')):null});close();render();toast('Value updated.');
+    } else if(form==='reconcile'){
+      const response=await change('/api/reconcile',{balancePaise:paise(data.get('balance'))});close();render();if(response.adjustment)openCorrection(response.adjustment);else toast('Your balances match.');
     }
-  }, 30000);
-}
-
+  }catch(error){toast(error.message,true);}finally{app.busy=false;if(submit?.isConnected)submit.disabled=false;}
+});
+document.addEventListener('input',event=>{
+  if(event.target.closest('#plan-form')){app.dirty=true;updatePlanTotal();}
+  if(event.target.closest('[data-form=tx]'))updateTransactionWarning();
+  if(event.target.closest('[data-form=move]'))updateMoveWarning();
+  if(event.target.dataset.control==='search'){app.search=event.target.value;filterActivity();}
+});
+document.addEventListener('change',async event=>{
+  try {
+    if(event.target.dataset.control==='month')await selectMonth(event.target.value);
+    if(event.target.dataset.control==='fund-month'){await selectMonth(event.target.value);openFunding();}
+    if(event.target.dataset.control==='filter'){app.filter=event.target.value;filterActivity();}
+    if(event.target.name==='txType'||event.target.name==='categoryId')updateTransactionFields();
+    if(event.target.name==='from')updateMoveWarning();
+    if(event.target.name==='history'){const field=$('[data-opening-cost]');if(field)field.hidden=event.target.value!=='existing';}
+    if(event.target.id==='restore-file'){
+      const file=event.target.files[0];if(!file)return;const data=JSON.parse(await file.text());
+      if(confirm('Replace all current data with this backup?')){await change('/api/restore',data);app.dirty=false;await refresh();toast('Backup restored.');}
+    }
+  }catch(error){toast(error.message,true);}
+});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&app.modal&&!app.busy)close();
+  if(event.key==='Tab'&&app.modal){const nodes=$$('#modal-root button:not([disabled]), #modal-root input:not([disabled]), #modal-root select:not([disabled]), #modal-root summary').filter(el=>el.getClientRects().length);const first=nodes[0],last=nodes.at(-1);if(event.shiftKey&&document.activeElement===first){last?.focus();event.preventDefault();}else if(!event.shiftKey&&document.activeElement===last){first?.focus();event.preventDefault();}}
+});
+window.addEventListener('beforeunload',event=>{if(app.dirty){event.preventDefault();event.returnValue='';}});
+window.addEventListener('hashchange',()=>{const next=location.hash.slice(1);if(next===app.view)return;if(app.dirty&&!confirm('Discard unsaved plan changes?')){location.hash=app.view;return;}app.dirty=false;app.view=['dashboard','plan','transactions','settings'].includes(next)?next:'dashboard';render();});
+setInterval(async()=>{if(!app.data||app.modal||app.dirty||app.busy||document.visibilityState!=='visible'||['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))return;const period=app.period;try{const response=await api('/api/state');if(app.period===period&&JSON.stringify(response.state)!==JSON.stringify(app.data)){app.data=response.state;render();}}catch{}},30000);
+async function init(){app.period=/^\d{4}-(0[1-9]|1[0-2])$/.test(app.period)?app.period:currentMonth();try{await refresh();}catch(error){$('#app').innerHTML=`<div class="setup"><div class="setup-card"><h1>Couldn’t load Khaata</h1><p>${esc(error.message)}</p><button class="btn primary" onclick="location.reload()">Try again</button></div></div>`;}}
 init();

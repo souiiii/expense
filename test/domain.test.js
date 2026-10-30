@@ -18,6 +18,7 @@ import {
   savePlan,
   undoAllocation,
   updateInvestmentValue,
+  updateInvestmentHistory,
   updateTransaction,
 } from '../lib/domain.js';
 
@@ -142,10 +143,10 @@ test('insufficient funds aborts allocation without changing anything', () => {
 
 test('rollover envelope keeps its leftover and adds the new month target', () => {
   const state = funded();
-  allocateMonth(state, '2026-10');
+  allocateMonth(state, '2026-09');
 
   addTransaction(state, {
-    date: '2026-10-05',
+    date: '2026-09-05',
     description: 'Shirt',
     amountPaise: P(1000),
     direction: 'out',
@@ -155,17 +156,17 @@ test('rollover envelope keeps its leftover and adds the new month target', () =>
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(3000));
 
   addIncome(state, 100000, '2026-10-01');
-  allocateMonth(state, '2026-11');
+  allocateMonth(state, '2026-10');
 
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(7000));
 });
 
 test('spending overspend reduces the next month available amount', () => {
   const state = funded();
-  allocateMonth(state, '2026-10');
+  allocateMonth(state, '2026-09');
 
   addTransaction(state, {
-    date: '2026-10-05',
+    date: '2026-09-05',
     description: 'Big clothes purchase',
     amountPaise: P(5000),
     direction: 'out',
@@ -175,7 +176,7 @@ test('spending overspend reduces the next month available amount', () => {
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(-1000));
 
   addIncome(state, 100000, '2026-10-01');
-  const allocation = allocateMonth(state, '2026-11');
+  const allocation = allocateMonth(state, '2026-10');
   const clothes = allocation.items.find((item) => item.categoryId === 'clothes');
 
   assert.equal(clothes.carryPaise, P(-1000));
@@ -186,10 +187,10 @@ test('spending overspend reduces the next month available amount', () => {
 
 test('non-rollover spending buckets also carry an overspend', () => {
   const state = funded();
-  allocateMonth(state, '2026-10');
+  allocateMonth(state, '2026-09');
 
   addTransaction(state, {
-    date: '2026-10-05',
+    date: '2026-09-05',
     description: 'Big grocery run',
     amountPaise: P(13000),
     direction: 'out',
@@ -199,7 +200,7 @@ test('non-rollover spending buckets also carry an overspend', () => {
   assert.equal(state.categories.find((c) => c.id === 'groceries').balancePaise, P(-1000));
 
   addIncome(state, 100000, '2026-10-01');
-  const allocation = allocateMonth(state, '2026-11');
+  const allocation = allocateMonth(state, '2026-10');
   const groceries = allocation.items.find((item) => item.categoryId === 'groceries');
 
   assert.equal(groceries.carryPaise, P(-1000));
@@ -209,10 +210,10 @@ test('non-rollover spending buckets also carry an overspend', () => {
 
 test('fixed bills and loans refill to their full target, not less', () => {
   const state = funded();
-  allocateMonth(state, '2026-10');
+  allocateMonth(state, '2026-09');
 
   addTransaction(state, {
-    date: '2026-10-05',
+    date: '2026-09-05',
     description: 'Rent plus late fee',
     amountPaise: P(21000),
     direction: 'out',
@@ -222,7 +223,7 @@ test('fixed bills and loans refill to their full target, not less', () => {
   assert.equal(state.categories.find((c) => c.id === 'rent').balancePaise, P(-1000));
 
   addIncome(state, 100000, '2026-10-01');
-  const allocation = allocateMonth(state, '2026-11');
+  const allocation = allocateMonth(state, '2026-10');
   const rent = allocation.items.find((item) => item.categoryId === 'rent');
 
   assert.equal(rent.carryPaise, 0);
@@ -232,9 +233,10 @@ test('fixed bills and loans refill to their full target, not less', () => {
 
 test('rollover envelope respects its cap', () => {
   const state = funded();
-  allocateMonth(state, '2026-10');
+  allocateMonth(state, '2026-09');
 
   moveBetweenEnvelopes(state, {
+    period: '2026-09',
     fromCategoryId: 'groceries',
     toCategoryId: 'clothes',
     amountPaise: P(1000),
@@ -242,16 +244,17 @@ test('rollover envelope respects its cap', () => {
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(5000));
 
   addIncome(state, 100000, '2026-10-01');
-  allocateMonth(state, '2026-11');
+  allocateMonth(state, '2026-10');
 
   assert.equal(state.categories.find((c) => c.id === 'clothes').balancePaise, P(8000));
 });
 
 test('non-rollover envelope resets to target and sweeps the excess', () => {
   const state = funded();
-  allocateMonth(state, '2026-10');
+  allocateMonth(state, '2026-09');
 
   moveBetweenEnvelopes(state, {
+    period: '2026-09',
     fromCategoryId: 'emergency',
     toCategoryId: 'groceries',
     amountPaise: P(3000),
@@ -259,7 +262,7 @@ test('non-rollover envelope resets to target and sweeps the excess', () => {
   assert.equal(state.categories.find((c) => c.id === 'groceries').balancePaise, P(15000));
 
   addIncome(state, 100000, '2026-10-01');
-  allocateMonth(state, '2026-11');
+  allocateMonth(state, '2026-10');
 
   assert.equal(state.categories.find((c) => c.id === 'groceries').balancePaise, P(12000));
 });
@@ -552,7 +555,7 @@ test('money can be moved from Not divided into a bucket and back', () => {
   allocateMonth(state, '2026-10');
   assert.equal(computeUnallocated(state), 0);
 
-  addIncome(state, 5000, '2026-10-01');
+  addIncome(state, 5000, new Date().toLocaleDateString('en-CA'));
   assert.equal(computeUnallocated(state), P(5000));
 
   moveBetweenEnvelopes(state, {
@@ -862,6 +865,7 @@ test('an investment withdrawal does not undo the month investment tick', () => {
 
 test('investment summary tracks put in, took out, worth and gain', () => {
   const state = funded();
+  updateInvestmentHistory(state, 'invest', 0);
   addTransaction(state, {
     date: '2026-10-01',
     description: 'First SIP',
@@ -944,6 +948,7 @@ test('investment gain is not guessed without a recorded contribution', () => {
 
 test('investment gain hides after a movement until worth is updated', () => {
   const state = funded();
+  updateInvestmentHistory(state, 'invest', 0);
   addTransaction(state, {
     date: '2026-10-01',
     description: 'SIP',

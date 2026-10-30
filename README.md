@@ -1,269 +1,119 @@
 # Khaata
 
-A local-first expense tracker built around buckets. No bank login, no cloud, no build step. Your data is a JSON file on your own computer.
+A local expense tracker and salary budget. One tracked bank balance, virtual buckets, manual investment values, and no bank login or cloud service.
 
-Khaata does **not** log into your bank. It keeps itself current from bank/UPI alerts you forward to its own ingest endpoint (see below), or from manual entries. That keeps it legal, private, and independent of any one bank's API.
+## Run
 
-Built for one person with one salary: bills are funded first, the rest is split across spending buckets by percentage, and leftovers for clothes/electronics carry forward up to a maximum.
+Requires Node 20 or newer. There are no dependencies to install.
 
-## Use it in one minute
-
-1. **Salary day:** add the salary as **Received**, then press **Divide salary**.
-2. **When you spend:** press **Add expense** and choose a bucket.
-3. **If the big number looks wrong:** press **Check bank balance** and type what your bank app shows.
-4. **Next month:** repeat. That's it.
-
-If you set up after the salary already landed, do not add it again — it is already in your bank balance.
-
-## Run it
-
-Requires Node 20 or newer.
-
-```bash
+```sh
 npm start
 ```
 
-Open **http://127.0.0.1:4321**.
+Open **http://127.0.0.1:4321**. Restart the server after updating the application.
 
-There are no dependencies to install.
+## First use
 
-## First run
+1. Enter your expected take-home salary and current bank balance.
+2. Review **Plan**: set your actual bills, savings, investments, and spending shares. The starting amounts are examples.
+3. For bills already paid before your starting balance, open the row's **⋯** options and select **Already paid this month**.
+4. Save the plan, then **Fund month**.
 
-Enter two numbers:
+Setup does not divide your money automatically. Your opening balance already includes earlier activity; only log new transactions after that balance. The starting date prevents transactions from earlier dates being counted again. On the starting day, take care not to re-enter payments already included in the balance.
 
-1. **Monthly salary (take-home)** — what actually reaches your bank.
-2. **Money in your bank right now** — what is in the account today.
+## Day to day
 
-If the balance is enough to cover the whole monthly plan, the app divides it immediately. If salary hasn't landed yet, it leaves the money undivided and tells you; add the salary as **Received** and divide it once it arrives.
+- **Expense:** record what you paid and the bucket it belongs to.
+- **Income:** record salary or other money received. Choose the month you want to fund next.
+- **Fund month:** preview the resulting balances. If cash is short, fund essentials now and **Top up** when the rest arrives.
+- **Move money:** relabel money between buckets or Unassigned. This does not change the bank total.
+- **Check bank balance:** match your recorded balance to your bank. Identify the resulting correction as an expense, income, refund, or transfer when you know its cause.
+- **Activity:** view transactions, funding and budget moves by month.
 
-The seeded plan is a template for ₹1,00,000. Edit every amount in **Plan** before trusting it: your rent, EMI and SIP are yours, not the defaults. There is also a **See an example first** button on the setup screen.
+**Available to spend** is funded spending money after protecting bills, goals, and next month's reserved cash. It is based on what you have logged, not a bank feed. The daily guide divides that amount by the days until your configured payday.
 
-## When salary arrives
+## Funding and months
 
-1. Press **Add income** on Home.
-2. Enter the amount and save.
-3. The app immediately opens **Divide this month's salary**. Press **Divide salary**.
+Bills and loans come first. With partial funding, the built-in Groceries, Transport and Misc buckets come next, followed by savings, investments, and other spending. Use Move money to adjust priorities for your own plan.
 
-If the month is already divided, extra money shows as **not divided**. Open **Move money**, choose **From: Not divided**, pick the bucket, and move it there. Or leave it for next month. Dates cannot be in the future: the app records money after it has actually moved.
+A month has one saved plan and can receive multiple funding instalments. Top-ups fill the remaining plan without resetting spending or adding the monthly target twice. Changes to Plan affect subsequent funding months; a funded month keeps its saved rules.
 
-## If the bank does not match
+You can fund **this month or next month**. Future funding is held separately and does not reset this month's buckets. It activates when the month begins. Next month's overview shows its planned balances, while this month's overview excludes that reservation from available spending.
 
-The big number is a record of what you logged, not a live bank feed.
+A transaction's **Date** is when cash moved. **Budget month** identifies the budget or bill it covers, so early rent and late EMIs can be assigned correctly. Transaction history and cash-flow totals still use the actual date.
 
-- **Bank shows less:** usually a missed expense. Press **Check balance** → **Record missing expense**, then choose the bucket.
-- **Bank shows more:** usually missed income or a refund. Press **Check balance** → **Record missing income**.
-- **Bank charge, interest, or a tiny rounding difference:** press **Check balance** → **Just match totals**.
+The accounting relationship is:
 
-Matching totals only changes **Not divided**. It never changes bucket balances. If matching would make buckets short, record the expense instead or use **Move money** → **To: Not divided** to take money out of a bucket.
-
-## Bucket types
-
-Each bucket has a type. The type decides how much it gets and which movements are allowed.
-
-| Type | Allocation | Accepts | Leftover |
-|---|---|---|---|
-| **Bill** | fixed rupee amount | Spent, Refund | Starts fresh |
-| **Saving** | fixed rupee amount | Moved out, Withdrawal | Stays |
-| **Investment** | fixed rupee amount | Moved out, Withdrawal | Stays, optional Max |
-| **Loan** | fixed rupee amount | Moved out, Withdrawal | Starts fresh |
-| **Spending** | percentage of what is left | Spent, Refund | Starts fresh, or stays for clothes/electronics. Overspending always carries |
-
-**You can add as many bills, savings, investments and loans as you want.** Each one has its own name, amount, Keep setting and Max. For example: “HDFC SIP” and “PPF” are two investment buckets; “Home loan” and “Education loan” are two loan buckets.
-
-The rules are enforced:
-
-- Bills and spending buckets only accept **Spent** and **Refund**. They cannot receive savings or investment money.
-- Savings, investments and loans only accept **Moved out** and **Withdrawal**. You cannot mark a coffee as “Spent” from an investment bucket.
-- Salary/income always goes to **Not divided**, never directly into a bucket.
-- Moving money between buckets is always allowed, because it is an explicit relabel. To spend from an investment, first **Move money** to a spending bucket, then log the spend.
-
-## Spending percentages and overspending
-
-The spending percentage is a share of the **spending pool**, not your total salary and not your bank balance:
-
-```
-Spending pool = take-home salary − all fixed buckets
-              = salary − (bills + savings + investments + loans)
+```text
+Bank balance = current bucket balances + future reservations + unassigned money
 ```
 
-For example, if salary is ₹1,00,000 and fixed buckets are ₹60,000, the spending pool is ₹40,000. Clothes at 10% gets ₹4,000. All spending percentages must add up to 100%.
+Amounts are stored as integer paise. Money inputs accept exact rupees and paise.
 
-Overspending has a real consequence:
+## Bills and goals
 
-- A spending bucket that goes negative keeps that negative balance.
-- Next month it gets its normal plan amount, but the negative is deducted first.
-- Example: Clothes plan ₹4,000, overspend ₹1,000. Next month Clothes gets **₹3,000**, not ₹4,000.
-- The card shows **“Started ₹1,000 lower · carried overspend.”**
-- If the overspend is bigger than the monthly amount, the bucket stays negative and the rest carries again.
-- **Keep leftover** applies to positive balances. A negative balance always carries.
-- **Max** caps positive buildup. It does not forgive a negative balance.
-- **Cover overspend** on the card lets you move money from another bucket to clear it immediately.
-- Fixed bills and EMIs are not reduced automatically. The app warns and refills them to their full target, because reducing next month’s rent or EMI would leave you short.
+- **Bills / loans:** record payments, and select **This bill is fully paid** when settled. A variable bill can cost less than its budget. Click its name to change the actual amount, due day through Plan, covered month, or paid status. Unpaid obligations remain visible, including months you did not fund.
+- **Savings:** funding money held in your bank counts toward the monthly goal. Moving it into spending reduces retained savings progress. A capped goal can show **Goal reached** without claiming a new contribution.
+- **Investments:** reserved cash and investment market value are separate. Record contributions as **Money moved out**, genuine redemptions as **Withdrawal**, and failed payments using **Payment failed / returned** on the original entry.
+- **Spending:** percentages split what remains after fixed goals. Positive leftovers carry only when Keep leftover is enabled; negative balances always carry. A maximum limits buildup.
 
-## Monthly ticks
+The overspending notice shows when positive buckets are not fully backed by cash. Covering an overspend suggests unassigned or discretionary money first, and warns when a move reduces a bill or goal's reservation.
 
-Fixed buckets show a green tick when the month's plan for that bucket is covered:
+## Investment values
 
-| Type | Tick when |
-|---|---|
-| **Bill** | This month's `Spent` (minus refunds) reaches the target |
-| **Saving** | The monthly amount is funded by **Divide salary**. Savings kept in the bank count as saved |
-| **Investment** | This month's `Moved out` reaches the target. A later withdrawal does not undo it |
-| **Loan** | This month's `Moved out` loan payment reaches the target |
-| **Spending** | No tick; it is ongoing |
+Expand **Investments** and choose **Update**. Enter the current value and declare the opening history once:
 
-The tick is derived from this month's activity and the monthly division target — not from the bucket balance. That means:
+- No holdings before Khaata: opening cost is zero.
+- Existing holdings: enter the cost of the holdings you owned when you started.
+- Unknown history: leave gain/loss hidden.
 
-- A savings bucket with last year's money does **not** tick just because its balance is high.
-- A bill bucket at zero does **not** tick just because its balance is zero.
-- A refund, bounced EMI, edited amount or deleted payment updates the tick automatically.
-- The transaction date decides which month a payment counts in. A payment dated last month does not tick this month.
-- Extra payments are allowed. The app shows a warning, but never blocks them.
-- A bucket added after the month's division shows **“Added after this month's division”** and starts ticking next month.
+Gain/loss is current value plus recorded redemptions minus recorded successful contributions and opening cost. Returned failed payments do not count as contributions or redemptions. Values become stale after movements, edits, or deletions until updated. Pausing or removing a cash-empty investment bucket keeps its holding visible. A bucket with pending cash cannot be removed until that money is moved.
 
-### Tracking an investment
+This is a cash ledger with manual values, not a portfolio accounting system. It does not fetch prices, dividends, taxes or investment units.
 
-Each investment bucket has its own summary panel:
+## Corrections and history
 
-| Label | Meaning |
-|---|---|
-| **Put in** | Money moved out to the investment, recorded in Khaata |
-| **Took out** | Money withdrawn back from the investment |
-| **Worth now** | What the investment is worth today. You enter it manually |
-| **Gain / loss** | `Worth now + Took out − Put in` |
+New budgets save the rules needed to replay dated activity. Late entries and edits recalculate affected balances and surplus using those saved rules.
 
-The **bucket balance is cash in your bank**, not the investment's market value. For example: invest ₹20,000, withdraw ₹22,000, then set Worth now to ₹0. The panel shows Put in ₹20,000, Took out ₹22,000, Gain +₹2,000.
+If a difference was already included by **Check bank balance**, classify that correction instead of entering the same movement again. You can classify part of a correction. Deleting a classified entry restores the unidentified correction and preserves the bank total.
 
-- Record every return from the investment as **Withdrawal**, including profit. Recording profit separately as **Received** keeps it out of the gain calculation.
-- Update **Worth now** after a contribution or withdrawal. It is a snapshot, not a live broker price. The gain stays hidden until you update it, so a stale worth cannot look like profit.
-- Gain needs at least one recorded **Moved out** contribution. For an investment you already owned before using Khaata, the panel shows **No history** instead of pretending the whole value is profit.
-- A redemption does not remove the investment tick for the month in which you invested; it is a separate return.
-- A month with only a withdrawal and no new investment shows **“to invest”**, not “done”. The money is sitting in the bucket waiting to be reinvested.
-- The dashboard stat shows **Moved out** when new moves are larger than withdrawals, and **Came back** when withdrawals are larger.
+**Older ledgers:** existing divisions without rule snapshots keep their exact effects. The app cannot reconstruct settings that were never stored. Entries before that history boundary require a correction dated today. Existing balances are preserved; there is no automatic reset.
 
-The app records cash movements and a manually entered current value. It is not a full portfolio ledger: cost basis only includes contributions recorded in Khaata, and it does not fetch prices, dividends or taxes.
+## Data and backups
 
-## The model
+- Current ledger: `data/store.json`.
+- Previous file version: `data/store.json.bak`.
+- Download and restore backups in **Settings → Your data**. Restore replaces the current ledger after validation.
+- If the main JSON file is damaged, startup attempts recovery from `.bak` and retains the damaged file as `.corrupt`.
 
-- **Bills** (rent, utilities), **savings** (emergency fund), **investments** (SIP, PPF) and **loans** (EMIs) are fixed rupee amounts and come first.
-- **Spending buckets** (groceries, transport, clothes, electronics, fun, misc) split whatever is left by percentage.
-- **Spending percentages must add up to 100%.**
-- **Keep leftover** means positive leftover stays next month. **Max** caps positive buildup. A negative balance always carries forward and reduces the next month’s available amount. Bills, loans, groceries and fun start fresh only for positive leftovers.
-- **One division per calendar month.** It fills each bucket from the undivided bank balance. Extra money goes to the chosen bucket (Emergency by default).
-- **Undo is available until money moves.** Once you record spending or move money between buckets, the division locks and you adjust buckets instead.
-- **The bank balance never changes when you divide or move money.** Dividing is just labelling money that is already there.
-- Buckets are virtual. The bank only knows one balance. Sum of buckets + undivided money always equals the real bank balance.
+The server binds to `127.0.0.1` by default and has no login. Keep it local. Separate bank accounts, credit cards and cash wallets are outside the current model.
 
-### Why not split the current balance by percentage continuously?
+## Optional alerts
 
-Because then buying clothes quietly shrinks your rent and EMI capacity, and no bucket can ever reach zero. Percentages are a **division rule**, applied once per payday, not a live lens on the balance.
+The existing token-authenticated ingest endpoint remains available for local bank/UPI alert automation. Endpoint and token are under **Settings → Automatic updates**. Bank connections are not required for normal use.
 
-### What counts as what
-
-| Action | Transaction type | Bucket type |
-|---|---|---|
-| Rent, utilities | Spent | Bill |
-| Groceries, clothes, fun | Spent | Spending |
-| Salary, interest | Received | Not divided (no bucket) |
-| SIP, PPF, stocks | Moved out | Investment |
-| Emergency fund deposit | Moved out | Saving |
-| Loan EMI | Moved out | Loan |
-| Withdrawal / redemption | Withdrawal | Saving / investment / loan |
-| Return / cashback | Refund | Spending / bill |
-| Bank mismatch | Check bank balance | Balance fix, no bucket |
-
-## Daily use
-
-- **Log a spend:** click `+` on a spending or bill bucket, or **Add expense**.
-- **Salary day:** add the credit as **Received**, then **Divide salary** on Home.
-- **Overspent a bucket:** **Move money** from another bucket to cover it.
-- **Save, invest or pay a loan:** click `+` on that bucket. The button says Save, Invest or Pay.
-- **Check against the bank:** **Check bank balance** whenever you want.
-- **Stuck?** Click **How to use** in the sidebar (or the `?` on mobile).
-
-## Automatic updates from bank / UPI alerts
-
-The app has an ingest endpoint. Your phone can POST each alert to it; the app records the transaction, guesses the bucket, and optionally matches the balance in the alert.
-
-Useful fields:
-
-| Field | Required | Notes |
-|---|---|---|
-| `amount` | yes | In **rupees**, e.g. `450.50` (₹ and commas are tolerated) |
-| `direction` | yes | `"out"` or `"in"` |
-| `description` | yes | Merchant / narration |
-| `balance` | no | Available balance from the alert, in rupees. Matches automatically. |
-| `date` | no | `YYYY-MM-DD`, defaults to today |
-| `category` | no | Bucket name, e.g. `"Fun"` |
-| `externalId` | no | Unique alert id. Sending the same id twice is ignored. |
-| `kind` | no | `expense`, `income`, `transfer`; defaults from direction |
-
-```bash
-curl -s -X POST http://127.0.0.1:4321/api/ingest \
+```sh
+curl -X POST http://127.0.0.1:4321/api/ingest \
   -H 'content-type: application/json' \
   -H 'x-ingest-token: YOUR_TOKEN' \
-  -d '{"amount":450.50,"direction":"out","description":"Swiggy","balance":52187.50,"externalId":"sms-9182"}'
+  -d '{"amount":450.50,"direction":"out","description":"Groceries","externalId":"alert-123"}'
 ```
 
-The token and a copy-ready curl snippet are in **Settings → Optional: automatic updates**. This section is collapsed until you need it.
-
-- **iPhone:** Shortcuts → Automation → SMS/email from your bank → Get Contents of URL → POST JSON. iOS cannot read other apps' notifications.
-- **Android:** Tasker or MacroDroid → notification from your bank/UPI app → HTTP POST. This is the closest to instant.
-- To reach the server from your phone, run `HOST=0.0.0.0 npm start` and use your Mac's LAN IP. Keep the token private; it can write to your data.
-
-Checking the bank balance is what keeps this honest: alerts can be missed, duplicated or delayed. One real balance check a day corrects everything.
-
-## Data and security
-
-- Ledger: `data/store.json`; previous version: `data/store.json.bak`.
-- **Settings → Backup** downloads a copy and can **restore** one. Restoring replaces all current data.
-- If the main file is ever damaged, the app recovers from `store.json.bak` on startup and keeps the damaged copy as `store.json.corrupt`.
-- The UI has no login because it binds to `127.0.0.1` only. Do not expose this server directly to the internet. For remote access, use a VPN such as Tailscale.
-- The ingest token is the only write credential. Rotate it in Settings if it leaks.
-- Never scrape your bank's website or store bank passwords. If you later connect a real bank API, use a licensed aggregator (RBI Account Aggregator in India, Plaid/TrueLayer elsewhere) with read-only consent.
-
-## Known limits
-
-- Khaata is a **record of cash movements**, not a live bank connection. It only knows what you log or send to the ingest endpoint.
-- Investment buckets track cash moved toward investing. The investment panel adds a manually entered current worth and gain/loss, but it is not a full portfolio ledger: no live prices, dividends, taxes, or cost basis from before you started using Khaata. Loan buckets track money paid toward an EMI, not the outstanding loan balance.
-- It handles one bank balance. Split accounts, credit cards and cash wallets are not separate ledgers.
-- The starting balance is captured when you set up. Do not re-add transactions that happened before setup; they are already inside that balance.
-- A bucket's type is chosen when it is created. To change it, move its balance to **Not divided**, remove it, and add it under the new type.
-- Dates cannot be in the future. The app records money after it moves.
-- One division per calendar month; corrections after spending are made with **Move money**, not a re-division.
+Amounts at this endpoint are rupees. Manual API endpoints use paise. An optional alert `balance` creates a reconciliation adjustment. Review unidentified corrections rather than treating a matched total as proof that every transaction is categorized correctly.
 
 ## Development
 
-```bash
-npm test        # money-engine and store tests: division, types, leftovers, max, undo, balance checks, recovery
-npm run dev     # restart on server changes
+```sh
+npm test          # money, history, syntax and persistence regression tests
+npm run test:api  # API checks with a disposable ledger and temporary local port
+npm run dev      # restart when server code changes
 ```
 
-Layout:
+The API checks also execute view templates without a browser. This does not replace visual or native-browser validation.
 
-- `lib/domain.js` — money engine. All amounts are integer paise; no floats.
-- `lib/seed.js` — default plan and demo data.
-- `lib/store.js` — atomic JSON persistence.
-- `server.js` — zero-dependency HTTP API and static server.
-- `public/` — vanilla JS/CSS client, no build step.
-
-### API summary
-
-- `GET /api/state`
-- `POST /api/setup` `{ mode: "fresh"|"demo", monthlyIncomePaise, openingBalancePaise }`
-- `POST /api/restore` — replace the ledger with an exported backup
-- `POST /api/transactions` · `PUT/DELETE /api/transactions/:id`
-- `PUT /api/plan` — full plan (`monthlyIncomePaise`, `paydayDay`, `surplusCategoryId`, `categories[]`)
-- `POST /api/allocate` · `POST /api/allocations/:id/undo`
-- `POST /api/reconcile` `{ balancePaise }`
-- `POST /api/move` `{ fromCategoryId, toCategoryId, amountPaise }`
-- `POST /api/ingest` — token-authenticated, amounts in rupees
-- `GET /api/export`
-
-## Roadmap
-
-1. CSV / bank statement import, with column mapping.
-2. Email-alert ingester running locally (Gmail API or IMAP).
-3. Recurring templates for rent, EMI and SIP.
-4. Read-only account-aggregator sync where available.
-5. PWA install + home-screen widget.
+- `lib/domain.js`: validation, commands, summaries and client state.
+- `lib/budget.js`: dated budget replay and saved rules.
+- `lib/store.js`: atomic JSON persistence and recovery.
+- `lib/seed.js`: initial template and example data.
+- `server.js`: local HTTP API.
+- `public/`: buildless JavaScript and responsive CSS.
