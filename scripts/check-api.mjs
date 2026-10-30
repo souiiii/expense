@@ -8,6 +8,7 @@ import vm from 'node:vm';
 import {todayString} from '../lib/domain.js';
 const directory=await fs.mkdtemp(path.join(os.tmpdir(),'khaata-api-test-'));
 process.env.DATA_FILE=path.join(directory,'store.json');process.env.PORT='0';process.env.HOST='127.0.0.1';
+process.env.DATABASE_URL=''; // Never sync disposable tests to a configured cloud ledger.
 const {server}=await import('../server.js');
 try {
  if(!server.listening)await once(server,'listening');
@@ -17,6 +18,7 @@ try {
   return {status:response.status,data:await response.json()};
  };
  const ok=async(...args)=>{const response=await request(...args);assert.equal(response.status,200,JSON.stringify(response.data));return response.data;};
+ assert.deepEqual(await ok('/api/sync',undefined,'GET'),{enabled:false,state:'disabled',pending:false});
  let setup=await ok('/api/setup',{monthlyIncomePaise:10000000,openingBalancePaise:10000000});
  assert.equal(setup.state.derived.allocation,null);assert.equal(setup.state.settings.planConfirmed,false);
  assert.equal((await request('/api/allocate',{period})).status,400);

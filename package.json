@@ -11,6 +11,9 @@
     "test:api": "node scripts/check-api.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.2.0"
   }
 }

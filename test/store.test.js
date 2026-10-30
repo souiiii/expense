@@ -35,3 +35,25 @@ test('store fails clearly when the file is damaged and there is no backup', () =
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('sync bookkeeping is persisted separately from domain state without replacing the previous ledger backup', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'khaata-store-sync-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'store.json');
+  const store = createStore(file);
+  const original = structuredClone(store.get());
+  const next = structuredClone(original);
+  next.settings.monthlyIncomePaise += 100;
+  store.set(next);
+  const metadata = { target: 'test', pending: null };
+  store.setSyncMetadata(metadata);
+  assert.deepEqual(store.get(), next);
+  assert.deepEqual(JSON.parse(fs.readFileSync(`${file}.bak`)), original);
+  const reopened = createStore(file);
+  assert.deepEqual(reopened.get(), next);
+  assert.deepEqual(reopened.getSyncMetadata(), metadata);
+  assert.equal(Object.hasOwn(reopened.get(), '_cloudSync'), false);
+  reopened.set({ ...original, _cloudSync: { target: 'imported-untrusted-metadata' } });
+  assert.deepEqual(reopened.getSyncMetadata(), metadata);
+  assert.equal(Object.hasOwn(reopened.get(), '_cloudSync'), false);
+});

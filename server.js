@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { paymentTotal, replayBudgets } from './lib/budget.js';
 import { createStore } from './lib/store.js';
+import { createCloudSync } from './lib/cloud-sync.js';
 import { createState, createDemoState, fitDefaultsToIncome } from './lib/seed.js';
 import {
   AppError,
@@ -36,12 +37,31 @@ import {
 } from './lib/domain.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+if (existsSync(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_FILE = process.env.DATA_FILE || path.join(ROOT, 'data', 'store.json');
 const PORT = Number(process.env.PORT || 4321);
 const HOST = process.env.HOST || '127.0.0.1';
 
 const store = createStore(DATA_FILE);
+let cloudSync = null;
+if (process.env.DATABASE_URL?.trim()) {
+  const intervalMs = Number(process.env.CLOUD_SYNC_INTERVAL_MS || 60_000);
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1000) {
+    throw new Error('CLOUD_SYNC_INTERVAL_MS must be an integer of at least 1000 milliseconds.');
+  }
+  const { createNeonReplica } = await import('./lib/neon.js');
+  cloudSync = createCloudSync({
+    store,
+    replica: createNeonReplica(process.env.DATABASE_URL.trim(), process.env.CLOUD_LEDGER_ID || 'personal'),
+    intervalMs,
+    validate: (state) => {
+      const validated = validateImportedState(state);
+      replayBudgets(validated);
+      clientState(validated);
+    },
+  });
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -405,6 +425,10 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, time: new Date().toISOString() });
   }
 
+  if (req.method === 'GET' && pathname === '/api/sync') {
+    return sendJson(res, 200, cloudSync?.getStatus() ?? { enabled: false, state: 'disabled', pending: false });
+  }
+
   if (req.method === 'GET' && pathname === '/api/state') {
     return sendJson(res, 200, reply());
   }
@@ -642,6 +666,9 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Khaata is running at http://${HOST}:${PORT}`);
   console.log(`Data: ${DATA_FILE}`);
+  console.log(`Cloud sync: ${cloudSync ? 'enabled (Neon, in background)' : 'disabled (set DATABASE_URL to enable)'}`);
+  cloudSync?.start();
 });
+server.on('close', () => { void cloudSync?.stop(); });
 
 export { server };

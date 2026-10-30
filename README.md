@@ -1,12 +1,13 @@
 # Khaata
 
-A local expense tracker and salary budget. One tracked bank balance, virtual buckets, manual investment values, and no bank login or cloud service.
+A local expense tracker and salary budget. One tracked bank balance, virtual buckets, manual investment values, and no bank login. Optional Neon cloud storage sync runs behind the existing local backend.
 
 ## Run
 
-Requires Node 20 or newer. There are no dependencies to install.
+Requires Node 20.12 or newer.
 
 ```sh
+npm install
 npm start
 ```
 
@@ -114,6 +115,80 @@ The API checks also execute view templates without a browser. This does not repl
 - `lib/domain.js`: validation, commands, summaries and client state.
 - `lib/budget.js`: dated budget replay and saved rules.
 - `lib/store.js`: atomic JSON persistence and recovery.
+- `lib/cloud-sync.js`: durable background sync and conflict protection.
+- `lib/neon.js`: Neon PostgreSQL storage adapter.
 - `lib/seed.js`: initial template and example data.
 - `server.js`: local HTTP API.
 - `public/`: buildless JavaScript and responsive CSS.
+
+## Optional Neon cloud storage
+
+The app continues to read and save locally. Cloud requests never sit in the path
+of opening the app or recording a transaction. The UI, API responses, paise
+amounts, budgeting rules and calculations stay the same.
+
+1. Create a Neon project and copy its PostgreSQL connection string from **Connect**.
+2. Copy `.env.example` to `.env` in this repository.
+3. Set `DATABASE_URL` in `.env` to that connection string. Keep it private;
+   `.env` is ignored by Git and is never served to the browser.
+4. Run `npm install`, then restart with `npm start`.
+
+The backend creates `public.khaata_ledgers` automatically. Each ledger is stored
+as one JSONB document so existing history and domain rules are preserved exactly.
+An empty cloud ledger receives your existing local data on its first sync; no
+reset or manual re-entry is needed. Leave `CLOUD_LEDGER_ID=personal` stable.
+Different IDs select separate ledgers in the same database.
+
+Each local save queues a background upload after 250 milliseconds. Multiple
+nearby saves are combined. The saved `_cloudSync` bookkeeping inside
+`data/store.json` records the last cloud revision and any in-flight snapshot;
+it is excluded from domain state and downloaded backups. Changes survive
+connection failures and restarts, including an upload whose response was lost.
+Only one sync request sequence runs at a time.
+
+The backend also checks for cloud updates/retries every 60 seconds while it is
+running. Set `CLOUD_SYNC_INTERVAL_MS` to change that interval. Frequent checks
+can keep Neon compute awake and consume its free compute allowance; use a
+longer interval if needed. New local saves still trigger a prompt sync.
+
+Inspect sync without changing the UI:
+
+```sh
+curl http://127.0.0.1:4321/api/sync
+```
+
+The response reports `enabled`, `state` (`pending`, `syncing`, `synced`,
+`offline`, or `conflict`), `pending`, `lastSyncedAt`, and a sanitized `error`.
+With no `DATABASE_URL`, sync is disabled and the app runs locally as before.
+Cloud failures are reported in the server terminal; local saves keep working.
+
+Cloud changes replace the local copy only when it has no unsynced edits, or
+when a newly created, untouched installation is loading its ledger for the
+first time. Downloads pass the existing backup and budget validation first.
+Writes use atomic revision checks. Divergent edits are never automatically
+merged or resolved by timestamps.
+
+### Cloud recovery
+
+If `/api/sync` reports `conflict`, both ledgers remain intact and automatic
+uploads pause until the conflict is resolved. Stop the backend and preserve
+`data/store.json` and `data/store.json.bak` before recovery.
+
+- **Use the cloud copy:** start with a new local file, for example
+  `DATA_FILE=data/cloud-recovery.json npm start`. The existing local file stays
+  intact. The untouched new file downloads the cloud ledger in the background;
+  wait for `/api/sync` to report `synced` before editing. Keep using that
+  `DATA_FILE` afterward. Reload the page after the initial download.
+- **Use the local copy:** keep your original local file and select a new unused
+  `CLOUD_LEDGER_ID` in `.env`, such as `personal-recovered-1`, then restart.
+  This uploads the local copy into a separate row without overwriting the
+  conflicting cloud copy. Keep the new ID afterward.
+- **Keep changes from both:** preserve both copies and review their JSON
+  backups before combining anything. There is no automatic financial-history
+  merge.
+
+Cloud sync is a second copy, not versioned backup history: intentional deletes,
+reset and restore also sync. Continue downloading backups. Only the backend
+holds database credentials. Your computer must remain on to use the app from
+your phone or sync to Neon; this does not add browser-offline support or a
+hosted backend. Keep the server local as described above.
