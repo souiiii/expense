@@ -331,7 +331,7 @@ function dashboardView() {
 
   <div class="stats">
     ${statCard('Spent this month', money(summary.spentPaise), `${summary.transactionCount} transaction${summary.transactionCount === 1 ? '' : 's'}`)}
-    ${statCard('Moved out', money(summary.investedPaise), 'Savings, investments, loans')}
+    ${statCard('Moved out', money(summary.investedPaise), 'Net transfers this month')}
     ${statCard(
       'Not divided',
       money(derived.unallocatedPaise),
@@ -1356,6 +1356,7 @@ function openHelpModal() {
       <li><strong>Spending</strong> has no tick; it is ongoing.</li>
     </ul>
     <p class="hint">The tick uses this month's activity, not the bucket balance. A transaction's date decides which month it counts in. Extra payments are allowed — you will see a warning, but the app will not block you. Editing or deleting a payment updates the tick automatically.</p>
+    <p class="hint">A <b>Money back</b> redemption is a return, not a new investment. It does not remove that month's investment tick. The app records the cash returned; it does not calculate market value or profit.</p>
 
     <h3 class="help-title">If the bank does not match</h3>
     <p class="hint">The app only knows what you have logged. If your bank shows less, you probably spent something and forgot to log it. Use <b>Check balance</b> → <b>Record missing expense</b>. If the bank shows more, record missing income. For a bank charge or interest, use <b>Just match totals</b>.</p>

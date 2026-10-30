@@ -764,6 +764,50 @@ test('monthly ticks handle overpayment and refunded buckets', () => {
   assert.equal(status.get('rent').paidPaise, P(-5000));
 });
 
+test('an investment withdrawal does not undo the month investment tick', () => {
+  const state = funded();
+  allocateMonth(state, '2026-10');
+
+  addTransaction(state, {
+    date: '2026-10-05',
+    description: 'SIP',
+    amountPaise: P(15000),
+    direction: 'out',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  addTransaction(state, {
+    date: '2026-10-06',
+    description: 'Redemption',
+    amountPaise: P(20000),
+    direction: 'in',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+
+  let status = new Map(
+    monthlyCommitments(state, '2026-10').map((item) => [item.categoryId, item])
+  );
+  assert.equal(status.get('invest').status, 'done');
+  assert.equal(status.get('invest').paidPaise, P(15000));
+
+  const withdrawalOnly = funded();
+  allocateMonth(withdrawalOnly, '2026-10');
+  addTransaction(withdrawalOnly, {
+    date: '2026-10-07',
+    description: 'Redemption only',
+    amountPaise: P(22000),
+    direction: 'in',
+    kind: 'transfer',
+    categoryId: 'invest',
+  });
+  status = new Map(
+    monthlyCommitments(withdrawalOnly, '2026-10').map((item) => [item.categoryId, item])
+  );
+  assert.equal(status.get('invest').status, 'due');
+  assert.equal(status.get('invest').paidPaise, 0);
+});
+
 test('demo state is internally consistent', () => {
   const state = createDemoState();
   const envelopes = state.categories.reduce((sum, c) => sum + c.balancePaise, 0);

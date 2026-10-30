@@ -98,6 +98,16 @@ The tick is derived from this month's activity and the monthly division target �
 - Extra payments are allowed. The app shows a warning, but never blocks them.
 - A bucket added after the month's division shows **“Added after this month's division”** and starts ticking next month.
 
+### Withdrawing from an investment
+
+- Record the money coming back as **Money back** into that investment bucket.
+- It increases your bank balance and the bucket balance. It is not spending and not ordinary income.
+- A redemption does not remove the investment tick for the month in which you invested; it is a separate return.
+- A month with only a withdrawal and no new investment shows **“to invest”**, not “done”. The money is sitting in the bucket waiting to be reinvested.
+- The **Moved out** stat is a net cash movement for the month, so a withdrawal can make it negative.
+- The app does not calculate market value or profit. To show a gain explicitly, split the return: principal as **Money back** to the bucket, gain as **Received**. For example: ₹20,000 Money back and ₹2,000 Received from a ₹22,000 redemption.
+- Your current portfolio value and gain/loss are not tracked. Investment buckets are cash envelopes, not a portfolio ledger.
+
 ## The model
 
 - **Bills** (rent, utilities), **savings** (emergency fund), **investments** (SIP, PPF) and **loans** (EMIs) are fixed rupee amounts, set aside first.
