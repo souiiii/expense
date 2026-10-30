@@ -15,6 +15,8 @@ import {
   monthlyCommitments,
   moveBetweenEnvelopes,
   reconcileBalance,
+  saveBucketType,
+  deleteBucketType,
   savePlan,
   undoAllocation,
   updateInvestmentValue,
@@ -995,4 +997,77 @@ test('demo state is internally consistent', () => {
   const demoInvestment = view.derived.investments.find((item) => item.categoryId === 'invest');
   assert.equal(demoInvestment.worthStale, false);
   assert.equal(demoInvestment.gainPaise, P(1000));
+});
+
+test('bucket types can be added, configured with rules, hold multiple buckets, and be removed', () => {
+  const state = funded();
+  assert.equal(state.bucketTypes.length, 5);
+
+  const customBt = saveBucketType(state, {
+    name: 'Long-Term Portfolios',
+    description: 'Retirement and gold holdings',
+    behavior: 'investment',
+    defaultRollover: true,
+    defaultCapPaise: P(50000),
+    priority: 4,
+    allowSurplus: true,
+    icon: '🪙',
+    color: '#a8842f',
+  });
+  assert.ok(customBt.id.startsWith('bt_'));
+  assert.equal(state.bucketTypes.length, 6);
+
+  const payload = {
+    monthlyIncomePaise: P(100000),
+    paydayDay: 1,
+    surplusCategoryId: 'emergency',
+    categories: state.categories.map((c) => ({ ...c })).concat([
+      {
+        kind: 'fixed',
+        type: 'investment',
+        bucketTypeId: customBt.id,
+        name: 'Gold ETF',
+        targetPaise: P(5000),
+        percent: 0,
+        rollover: customBt.defaultRollover,
+        capPaise: customBt.defaultCapPaise,
+        icon: '🪙',
+        color: '#a8842f',
+      },
+      {
+        kind: 'fixed',
+        type: 'investment',
+        bucketTypeId: 'investment',
+        name: 'PPF Account',
+        targetPaise: P(5000),
+        percent: 0,
+        rollover: true,
+        capPaise: null,
+        icon: '🏦',
+        color: '#23735f',
+      },
+    ]),
+  };
+  savePlan(state, payload);
+
+  const view = clientState(state);
+  assert.equal(view.derived.investments.length, 3);
+  const gold = view.categories.find((c) => c.name === 'Gold ETF');
+  assert.equal(gold.bucketTypeId, customBt.id);
+  assert.equal(gold.capPaise, P(50000));
+
+  saveBucketType(state, {
+    id: customBt.id,
+    name: 'Long-Term Portfolios',
+    behavior: 'investment',
+    defaultRollover: false,
+    defaultCapPaise: P(60000),
+    applyToExisting: true,
+  });
+  assert.equal(state.categories.find((c) => c.name === 'Gold ETF').rollover, false);
+  assert.equal(state.categories.find((c) => c.name === 'Gold ETF').capPaise, P(60000));
+
+  deleteBucketType(state, customBt.id);
+  assert.equal(state.bucketTypes.some((bt) => bt.id === customBt.id), false);
+  assert.equal(state.categories.find((c) => c.name === 'Gold ETF').archived, true);
 });

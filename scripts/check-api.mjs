@@ -69,7 +69,7 @@ try {
  for(const view of ['dashboard','plan','transactions','settings']){
   vm.runInContext(`app.view=${JSON.stringify(view)};render()`,context);assert.ok(nodes['#app'].innerHTML.includes('Khaata'));
  }
- vm.runInContext("openTransaction();openFunding();openReconcile();openWorth('invest');help()",context);
+ vm.runInContext("openTransaction();openFunding();openReconcile();openWorth('invest');openBucketType();openQuickAddBucket('investment');help()",context);
  assert.ok(nodes['#modal-root'].innerHTML.includes('How Khaata works'));
  console.log('API smoke checks passed: setup, exact amounts, paid bills, classification, reversals, restore, partial funding, next-month reservations, and view rendering.');
 } finally {

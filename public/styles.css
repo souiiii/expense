@@ -1051,6 +1051,47 @@ select {
   flex: none;
 }
 
+.panel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.type-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.type-chip:hover {
+  background: #eceae0;
+  color: var(--ink);
+}
+
+.type-chip.active {
+  background: var(--forest);
+  border-color: var(--forest);
+  color: #fffdf7;
+}
+
 .empty {
   margin: 0;
   padding: 28px 16px;
@@ -1383,6 +1424,47 @@ select {
   align-items: flex-start;
 }
 
+.investment-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.investment-summary-bar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.investment-summary-bar > div + div {
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+
+.investment-summary-bar span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.investment-summary-bar strong {
+  font: 22px/1.1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.investment-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .investment-total {
   display: flex;
   flex-direction: column;
@@ -1687,6 +1769,13 @@ select {
   border-bottom: 1px solid var(--line);
 }
 
+.waterfall-banner-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .waterfall-banner h2 {
   margin: 0 0 4px;
   font: 26px/1.1 var(--font-display);
@@ -1700,7 +1789,7 @@ select {
 }
 
 .plan-section {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 
 .plan-section:last-child {
@@ -1709,10 +1798,53 @@ select {
 
 .plan-section-head {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.plan-section-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.plan-type-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.plan-type-subtotal {
+  color: var(--forest);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.rule-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.rule-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .plan-section-head h3 {
@@ -1735,11 +1867,10 @@ select {
 }
 
 .plan-count {
-  display: grid;
-  place-items: center;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
@@ -1764,15 +1895,126 @@ select {
 
 .plan-line-main {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto 136px auto;
+  grid-template-columns: 36px minmax(140px, 1fr) minmax(190px, 1.3fr) 116px auto;
   gap: 12px;
   align-items: center;
   padding: 11px 14px;
   background: var(--surface);
 }
 
-.plan-line:not([data-type="spending"]) .plan-line-main {
-  grid-template-columns: 36px minmax(0, 1fr) 146px auto;
+.plan-line.is-fixed-line .plan-line-main {
+  grid-template-columns: 36px minmax(0, 1fr) 148px auto;
+}
+
+.plan-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.percent-slider {
+  flex: 1;
+  min-width: 80px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  background: #dfe6dc;
+  accent-color: var(--forest);
+  cursor: pointer;
+}
+
+.percent-slider:focus {
+  box-shadow: none;
+}
+
+.lock-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.lock-btn.is-locked {
+  border-color: var(--terracotta);
+  background: #f8ece4;
+}
+
+.small-field {
+  min-width: 72px !important;
+  max-width: 90px;
+}
+
+.small-field input[type="color"] {
+  height: 40px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.bt-settings-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.bt-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.bt-settings-row:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.bt-settings-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.bt-settings-main strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+}
+
+.bt-settings-main small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.bt-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.settings-card-wide {
+  grid-column: 1 / -1;
+}
+
+.bt-rules-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
 }
 
 .plan-icon {
@@ -2846,14 +3088,33 @@ details[open] > summary::after {
   }
 
   .plan-line-main,
-  .plan-line:not([data-type="spending"]) .plan-line-main {
+  .plan-line.is-fixed-line .plan-line-main {
     grid-template-columns: 32px minmax(0, 1fr) 110px auto;
     gap: 8px;
     padding: 10px;
   }
 
-  .plan-calc-rupees {
-    display: none;
+  .plan-slider-wrap {
+    grid-column: 1 / -1;
+    padding-top: 4px;
+  }
+
+  .waterfall-banner-top,
+  .bt-settings-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .investment-summary-bar {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .investment-summary-bar > div + div {
+    padding-left: 0;
+    padding-top: 10px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
 
   .plan-advanced-head {

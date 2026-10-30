@@ -25,6 +25,8 @@ import {
   reconcileBalance,
   rotateIngestToken,
   rupeesText,
+  saveBucketType,
+  deleteBucketType,
   savePlan,
   todayString,
   undoAllocation,
@@ -489,13 +491,30 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, reply({ transaction }));
   }
 
+  if (req.method === 'POST' && pathname === '/api/bucket-types') {
+    const body = await readJson(req);
+    const state = structuredClone(store.get());
+    const bucketType = saveBucketType(state, body);
+    store.set(state);
+    return sendJson(res, 200, reply({ bucketType }));
+  }
+
+  const btMatch = pathname.match(/^\/api\/bucket-types\/([^/]+)$/);
+  if (btMatch && req.method === 'DELETE') {
+    const state = structuredClone(store.get());
+    const bucketType = deleteBucketType(state, btMatch[1]);
+    store.set(state);
+    return sendJson(res, 200, reply({ bucketType }));
+  }
+
   if (req.method === 'PUT' && pathname === '/api/plan') {
     const body = await readJson(req);
     const state = structuredClone(store.get());
     const result = savePlan(state, body);
     for (const raw of body.categories) {
-      if (!raw.alreadyPaid || !['bill', 'loan'].includes(raw.type)) continue;
+      if (!raw.alreadyPaid) continue;
       const category = state.categories.find(c => c.name.toLowerCase() === raw.name.trim().toLowerCase() && !c.archived);
+      if (!category || !['bill', 'loan'].includes(categoryType(category))) continue;
       settleBill(state, category.id, {period: body.period || selectedPeriod, amountPaise: category.targetPaise, settled: true});
     }
     store.set(state);
