@@ -31,17 +31,19 @@ Setup does not divide your money automatically. Your opening balance already inc
 - **Check bank balance:** match your recorded balance to your bank. Identify the resulting correction as an expense, income, refund, or transfer when you know its cause.
 - **Activity:** view transactions, funding and budget moves by month.
 
-**Available to spend** is funded spending money after protecting bills, goals, and next month's reserved cash. It is based on what you have logged, not a bank feed. The daily guide divides that amount by the days until your configured payday.
+**Available to spend** is funded spending money after protecting bills, goals, next month's reserved cash, and bills due before your next configured payday. Existing reservations and early payments are counted once. A bill without a due day is treated as due on the first for this protection; bills due on payday itself are assumed to use that payday's income. It is based on what you have logged, not a bank feed.
+
+The daily guide excludes planned-purchase buckets. Rollover spending buckets are excluded by default; change **Include in daily spending guide** in the bucket's Rules to override this. Their money remains available for the planned purchase.
 
 ## Funding and months
 
-Bills and loans come first. With partial funding, the built-in Groceries, Transport and Misc buckets come next, followed by savings, investments, and other spending. Use Move money to adjust priorities for your own plan.
+Partial funding follows the priority configured on each bucket type (1 first, 4 last), with an optional override in each bucket's Rules. Equal priorities follow the saved bucket order. The preview lists this order. New budgets save these priorities so later changes cannot rewrite their funding. Older snapshots without priority fields retain their original funding order.
 
-A month has one saved plan and can receive multiple funding instalments. Top-ups fill the remaining plan without resetting spending or adding the monthly target twice. Changes to Plan affect subsequent funding months; a funded month keeps its saved rules.
+A month has one saved plan and can receive multiple funding instalments. Top-ups fill the remaining plan without resetting spending or adding the monthly target twice. Changes to existing Plan rules affect subsequent funding months; a funded month keeps its saved rules. New bills are the exception: their first due month determines when the obligation starts. A new bill joins any affected current or next-month funded budget with zero funding, so its shortage is visible and Top up can fund it. Moving money into it also counts toward funding. To change an existing bill's current amount, use its Details.
 
 You can fund **this month or next month**. Future funding is held separately and does not reset this month's buckets. It activates when the month begins. Next month's overview shows its planned balances, while this month's overview excludes that reservation from available spending.
 
-A transaction's **Date** is when cash moved. **Budget month** identifies the budget or bill it covers, so early rent and late EMIs can be assigned correctly. Transaction history and cash-flow totals still use the actual date.
+A transaction's **Date** is when cash moved. The budget month follows this date until you explicitly override it. **Budget month** identifies the budget or bill it covers, so early rent and late EMIs can be assigned correctly. Transaction history and cash-flow totals still use the actual date.
 
 The accounting relationship is:
 
@@ -53,12 +55,16 @@ Amounts are stored as integer paise. Money inputs accept exact rupees and paise.
 
 ## Bills and goals
 
-- **Bills / loans:** record payments, and select **This bill is fully paid** when settled. A variable bill can cost less than its budget. Click its name to change the actual amount, due day through Plan, covered month, or paid status. Unpaid obligations remain visible, including months you did not fund.
-- **Savings:** funding money held in your bank counts toward the monthly goal. Moving it into spending reduces retained savings progress. A capped goal can show **Goal reached** without claiming a new contribution.
+- **Bills / loans:** record payments. Partial payments retain the outstanding amount; the settlement checkbox starts unchecked. Select **This bill is fully paid** explicitly to settle below the expected amount. A variable bill can cost less than its budget. Click its name to change the actual amount, due day through Plan, covered month, or paid status. Unpaid obligations remain visible, including months you did not fund.
+- **Savings:** funding money held in your bank counts toward the monthly goal. New savings transfers increase the external savings balance; withdrawals decrease it. Details lets you check or correct that external balance with a dated adjustment. Moving it into spending reduces retained savings progress. A capped goal can show **Goal reached** without claiming a new contribution.
 - **Investments:** reserved cash and investment market value are separate. Record contributions as **Money moved out**, genuine redemptions as **Withdrawal**, and failed payments using **Payment failed / returned** on the original entry.
 - **Spending:** percentages split what remains after fixed goals. Positive leftovers carry only when Keep leftover is enabled; negative balances always carry. A maximum limits buildup.
 
 The overspending notice shows when positive buckets are not fully backed by cash. Covering an overspend suggests unassigned or discretionary money first, and warns when a move reduces a bill or goal's reservation.
+
+Bill Rules also support monthly, quarterly, yearly, and one-off payments, with first and optional last due months. The entered amount is the amount of each scheduled payment. Funding requests it in the due month; use a separate savings goal to build up cash beforehand. A finished EMI stops creating new obligations after its last due month, while any unpaid earlier instalments remain due.
+
+Changing a type's accounting behavior is blocked once its buckets have financial history. Create a new type/bucket instead; existing entries and holdings retain their original meaning.
 
 ## Investment values
 
@@ -68,7 +74,7 @@ Expand **Investments** and choose **Update**. Enter the current value and declar
 - Existing holdings: enter the cost of the holdings you owned when you started.
 - Unknown history: leave gain/loss hidden.
 
-Gain/loss is current value plus recorded redemptions minus recorded successful contributions and opening cost. Returned failed payments do not count as contributions or redemptions. Values become stale after movements, edits, or deletions until updated. Pausing or removing a cash-empty investment bucket keeps its holding visible. A bucket with pending cash cannot be removed until that money is moved.
+Gain/loss is current value plus recorded redemptions minus recorded successful contributions and opening cost. Returned failed payments do not count as contributions or redemptions. Values become stale after movements, edits, or deletions until updated. Each value has an as-of date; historical views use only valuations on or before month-end and show no value when one was never recorded. Portfolio totals explicitly identify incomplete values and partial known gains. Pausing or removing a cash-empty investment bucket keeps its holding visible. A bucket with pending cash cannot be removed until that money is moved. A paused holding still accepts withdrawals and returned payments; incoming money goes to Unassigned, and new contributions remain blocked.
 
 This is a cash ledger with manual values, not a portfolio accounting system. It does not fetch prices, dividends, taxes or investment units.
 
@@ -79,6 +85,10 @@ New budgets save the rules needed to replay dated activity. Late entries and edi
 If a difference was already included by **Check bank balance**, classify that correction instead of entering the same movement again. You can classify part of a correction. Deleting a classified entry restores the unidentified correction and preserves the bank total.
 
 **Older ledgers:** existing divisions without rule snapshots keep their exact effects. The app cannot reconstruct settings that were never stored. Entries before that history boundary require a correction dated today. Existing balances are preserved; there is no automatic reset.
+
+## Compatibility with existing data
+
+Existing bank and bucket balances are retained. New schedule fields default to monthly behavior, and existing investment values retain their original recording date. Earlier savings transfers are not added to the external balance again, because they may already be included in a manually entered external amount. Check that amount once in Savings Details; subsequent transfers and withdrawals update it automatically. Backups include schedules, saved priorities, external savings adjustments and dated valuations.
 
 ## Data and backups
 

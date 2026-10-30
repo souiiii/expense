@@ -102,6 +102,14 @@ async function readJson(req) {
 }
 
 function validateImportedState(data) {
+  const validPeriod = p => typeof p === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(p);
+  const validTimestamp = t => typeof t === 'string' && !Number.isNaN(Date.parse(t));
+  const validSchedule = c => (!c.frequency || ['monthly', 'quarterly', 'yearly', 'once'].includes(c.frequency)) &&
+    (!c.startPeriod || validPeriod(c.startPeriod)) && (!c.endPeriod || validPeriod(c.endPeriod)) &&
+    (!c.frequency || c.frequency === 'monthly' || Boolean(c.startPeriod)) &&
+    (!c.startPeriod || !c.endPeriod || c.startPeriod <= c.endPeriod) &&
+    (c.priority == null || (Number.isInteger(c.priority) && c.priority >= 1 && c.priority <= 4)) &&
+    (c.includeInDailyGuide == null || typeof c.includeInDailyGuide === 'boolean');
   if (!data || typeof data !== 'object') {
     throw new AppError('INVALID_BACKUP', 'That is not a Khaata backup.', 400);
   }
@@ -152,6 +160,14 @@ function validateImportedState(data) {
       throw new AppError('INVALID_BACKUP', 'The backup contains duplicate buckets.', 400);
     }
     categoryIds.add(category.id);
+    if (!validSchedule(category) || (category.openingSavedPaise != null && (!Number.isSafeInteger(category.openingSavedPaise) || category.openingSavedPaise < 0))) throw new AppError('INVALID_BACKUP', 'A bucket schedule or opening savings amount is invalid.');
+    for (const [key, valid] of [
+      ['valuations', v => isValidDate(v.date) && v.date <= todayString() && validTimestamp(v.recordedAt) && (v.valuePaise === null || (Number.isSafeInteger(v.valuePaise) && v.valuePaise >= 0))],
+      ['valuationInvalidations', v => isValidDate(v.date) && validTimestamp(v.recordedAt)],
+      ['externalSavingsAdjustments', v => isValidDate(v.date) && v.date <= todayString() && validTimestamp(v.recordedAt) && Number.isSafeInteger(v.deltaPaise)],
+    ]) {
+      if (category[key] != null && (!Array.isArray(category[key]) || category[key].some(v => !v || !valid(v)))) throw new AppError('INVALID_BACKUP', 'Savings or valuation history is invalid.');
+    }
   }
   if (data.categories.length === 0) {
     throw new AppError('INVALID_BACKUP', 'The backup has no buckets.', 400);
@@ -181,8 +197,12 @@ function validateImportedState(data) {
       throw new AppError('INVALID_BACKUP', 'The backup contains an invalid transaction.', 400);
     }
     transactionIds.add(transaction.id);
+    if ((transaction.unassignedReturn != null && typeof transaction.unassignedReturn !== 'boolean') ||
+        (transaction.externalSaving != null && typeof transaction.externalSaving !== 'boolean') ||
+        (transaction.unassignedReturn && (transaction.direction !== 'in' || !transaction.categoryId))) throw new AppError('INVALID_BACKUP', 'A return destination is invalid.');
     if (transaction.categoryId) {
       const type = categoryType(data.categories.find(c => c.id === transaction.categoryId));
+      if (transaction.externalSaving && (type !== 'saving' || transaction.kind !== 'transfer')) throw new AppError('INVALID_BACKUP', 'An external savings movement is invalid.');
       if ((transaction.kind === 'expense' && !['bill', 'spending'].includes(type)) ||
           (transaction.kind === 'transfer' && !['saving', 'investment', 'loan'].includes(type))) {
         throw new AppError('INVALID_BACKUP', 'A transaction has the wrong bucket type.');
@@ -217,6 +237,7 @@ function validateImportedState(data) {
       const specs = allocation.snapshot.categories;
       if (!Array.isArray(specs) || !specs.length || !Array.isArray(allocation.fundings) || !allocation.fundings.length || new Set(specs.map(c => c.id)).size !== specs.length) throw new AppError('INVALID_BACKUP', 'The budget snapshot is invalid.');
       for (const spec of specs) if (!categoryIds.has(spec.id) || !['bill','loan','saving','investment','spending'].includes(spec.type) || !Number.isSafeInteger(spec.targetPaise) || spec.targetPaise < 0 || (spec.capPaise != null && (!Number.isSafeInteger(spec.capPaise) || spec.capPaise < 0))) throw new AppError('INVALID_BACKUP', 'The budget rules are invalid.');
+      for (const spec of specs) if (!validSchedule(spec) || (spec.recurringAmountPaise != null && (!Number.isSafeInteger(spec.recurringAmountPaise) || spec.recurringAmountPaise < 0))) throw new AppError('INVALID_BACKUP', 'A saved schedule or priority is invalid.');
       for (const funding of allocation.fundings) {
         if (!funding || !isValidDate(funding.date) || !funding.createdAt || Number.isNaN(Date.parse(funding.createdAt)) || !funding.amounts || typeof funding.amounts !== 'object') throw new AppError('INVALID_BACKUP', 'The funding history is invalid.');
         for (const [id, amount] of Object.entries(funding.amounts)) if (!specs.some(c => c.id === id) || !Number.isSafeInteger(amount) || amount < 0) throw new AppError('INVALID_BACKUP', 'A funding amount is invalid.');
@@ -230,7 +251,7 @@ function validateImportedState(data) {
     if (!Array.isArray(data.planVersions)) throw new AppError('INVALID_BACKUP', 'Plan history is invalid.');
     for (const plan of data.planVersions) {
       if (!plan || !/^\d{4}-(0[1-9]|1[0-2])$/.test(plan.effectivePeriod) || !plan.createdAt || Number.isNaN(Date.parse(plan.createdAt)) || !Array.isArray(plan.categories)) throw new AppError('INVALID_BACKUP', 'Plan history is invalid.');
-      for (const c of plan.categories) if (!categoryIds.has(c.id) || !Number.isSafeInteger(c.targetPaise) || c.targetPaise < 0) throw new AppError('INVALID_BACKUP', 'A historical plan amount is invalid.');
+      for (const c of plan.categories) if (!categoryIds.has(c.id) || !Number.isSafeInteger(c.targetPaise) || c.targetPaise < 0 || !validSchedule(c)) throw new AppError('INVALID_BACKUP', 'A historical plan amount or schedule is invalid.');
     }
   }
 
@@ -273,7 +294,7 @@ function settleFromTransaction(state, transaction, body) {
   if (!category || !['bill', 'loan'].includes(categoryType(category))) return;
   const period = transaction.budgetPeriod || transaction.date.slice(0, 7);
   settleBill(state, category.id, {period, settled: body.settleBill,
-    amountPaise: body.settleBill ? Math.max(0, paymentTotal(state, category.id, period)) : null});
+    amountPaise: body.settleBill ? Math.max(0, paymentTotal(state, category.id, period)) : undefined});
 }
 
 function handleSetup(body) {
@@ -579,7 +600,8 @@ async function handleApi(req, res, url) {
     const category = updateInvestmentValue(
       state,
       investmentValueMatch[1],
-      body.worthPaise
+      body.worthPaise,
+      body.date
     );
     if (Object.hasOwn(body, 'openingCostPaise')) updateInvestmentHistory(state, investmentValueMatch[1], body.openingCostPaise);
     store.set(state);

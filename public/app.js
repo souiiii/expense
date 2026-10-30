@@ -1,3 +1,5 @@
+import {scheduledAmount, peakFixedPlan} from './schedule.js';
+
 const app = {
   data: null,
   view: location.hash.slice(1) || 'dashboard',
@@ -86,7 +88,7 @@ async function api(path, { method = 'GET', body } = {}) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Could not save. Try again.');
-  if (data.state && (!data.state.derived?.safety || !data.state.derived?.fundingPreview)) {
+  if (data.state && (!data.state.derived?.safety || !data.state.derived?.fundingPreview || !data.state.derived?.investmentTotals)) {
     throw new Error('Khaata’s server is running an older version. Restart it with npm start, then reload this page.');
   }
   return data;
@@ -432,13 +434,14 @@ function dashboardView() {
 
   const savingCats = active().filter(c => type(c) === 'saving');
   const inBankSavings = savingCats.reduce((n, c) => n + Math.max(0, c.balancePaise), 0);
-  const openingExternalSavings = savingCats.reduce((n, c) => n + (c.openingSavedPaise || 0), 0);
+  const openingExternalSavings = savingCats.reduce((n, c) => n + (c.externalSavedPaise ?? c.openingSavedPaise ?? 0), 0);
   const totalSavings = inBankSavings + openingExternalSavings;
 
   const investments = d.investments || [];
   const netInv = i => i.netInvestedPaise ?? Math.max(0, (i.openingCostPaise || 0) + (i.putInPaise || 0) - (i.tookOutPaise || 0));
   const totalInvestedPrincipal = investments.reduce((n, i) => n + netInv(i), 0);
-  const totalEffectiveWorth = investments.reduce((n, i) => n + (i.worthPaise ?? netInv(i)), 0);
+  const portfolio = d.investmentTotals;
+  const totalEffectiveWorth = portfolio.estimatedWorthPaise;
   const totalCashWaitingToInvest = investments.reduce((n, i) => n + Math.max(0, cat(i.categoryId)?.balancePaise || 0), 0);
   const knownGains = investments.filter(i => i.gainPaise != null);
   const totalGain = knownGains.length ? knownGains.reduce((n, i) => n + i.gainPaise, 0) : null;
@@ -466,7 +469,7 @@ function dashboardView() {
         <p class="eyebrow light">Safe to spend · Everyday buckets</p>
         <h2 class="balance">${money(s.safeToSpendPaise)}</h2>
         <p class="hero-sub">${heroSub}</p>
-        <p class="hero-explain">Bills, EMIs, savings, and investments are already set aside separately.</p>
+        <p class="hero-explain">${s.upcomingBillGapPaise ? `${money(s.upcomingBillGapPaise)} is also protected for bills due before payday. ` : ''}The daily guide excludes ${money(s.purchaseReservePaise)} reserved for planned purchases.</p>
       </div>
       <div class="hero-actions">
         ${button('+ Log expense', 'expense', '', 'primary light')}
@@ -481,25 +484,25 @@ function dashboardView() {
             <strong>${money(d.bankBalancePaise)}</strong>
             <small>Real cash tracked</small>
           </div>
-          <span class="bank-eq-sign" aria-hidden="true">=</span>
+          <span class="bank-eq-sign" aria-hidden="true">·</span>
           <div class="bank-eq-part">
             <span class="bank-eq-label"><i class="dot dot-safe"></i>Safe to spend</span>
             <strong>${money(s.safeToSpendPaise)}</strong>
             <small>Everyday buckets</small>
           </div>
-          <span class="bank-eq-sign" aria-hidden="true">+</span>
+          <span class="bank-eq-sign" aria-hidden="true">·</span>
           <div class="bank-eq-part">
             <span class="bank-eq-label"><i class="dot dot-savings"></i>Cash savings</span>
             <strong>${money(inBankSavings)}</strong>
             <small>Savings buckets in bank</small>
           </div>
-          <span class="bank-eq-sign" aria-hidden="true">+</span>
+          <span class="bank-eq-sign" aria-hidden="true">·</span>
           <div class="bank-eq-part">
             <span class="bank-eq-label"><i class="dot dot-reserved"></i>Bills &amp; SIP cash</span>
             <strong>${money(billsAndSipReserve)}</strong>
             <small>${s.futureReservedPaise ? `Includes ${money(s.futureReservedPaise)} next mo` : 'Set aside for bills & SIPs'}</small>
           </div>
-          <span class="bank-eq-sign" aria-hidden="true">+</span>
+          <span class="bank-eq-sign" aria-hidden="true">·</span>
           <div class="bank-eq-part ${d.unallocatedPaise < 0 ? 'is-negative' : d.unallocatedPaise > 0 ? 'is-warm' : ''}">
             <span class="bank-eq-label"><i class="dot dot-unassigned"></i>Unassigned</span>
             <strong>${money(d.unallocatedPaise)}</strong>
@@ -527,12 +530,12 @@ function dashboardView() {
         <small class="wealth-sub">${totalCashWaitingToInvest > 0 ? `+ ${money(totalCashWaitingToInvest)} waiting in bucket for SIP` : `Principal across ${investments.length} holding${investments.length === 1 ? '' : 's'}`}</small>
       </div>
       <div class="wealth-card">
-        <span class="wealth-label">Portfolio Market Worth</span>
+        <span class="wealth-label">${portfolio.worthComplete ? 'Portfolio Market Worth' : 'Portfolio value · incomplete'}</span>
         <strong class="wealth-value">${money(totalEffectiveWorth)}</strong>
-        <small class="wealth-sub ${totalGain > 0 ? 'positive' : totalGain < 0 ? 'negative' : ''}">${totalGain != null ? `${totalGain >= 0 ? '+' : ''}${money(totalGain)} gain / loss` : 'At cost basis · update worth below'}</small>
+        <small class="wealth-sub ${totalGain > 0 ? 'positive' : totalGain < 0 ? 'negative' : ''}">${totalGain != null ? `${totalGain >= 0 ? '+' : ''}${money(totalGain)} ${portfolio.gainComplete ? 'gain / loss' : `known gain (${portfolio.gainCount}/${portfolio.count} holdings)`}` : 'Values incomplete · update worth below'}</small>
       </div>
       <div class="wealth-card wealth-card-highlight">
-        <span class="wealth-label">Savings + Investments</span>
+        <span class="wealth-label">${portfolio.worthComplete ? 'Savings + Investments' : 'Savings + Investments · estimate'}</span>
         <strong class="wealth-value">${money(totalSavings + totalEffectiveWorth)}</strong>
         <small class="wealth-sub">Spent in ${monthName(app.period).split(' ')[0]}: ${money(d.summary.grossSpentPaise)}</small>
       </div>
@@ -622,7 +625,7 @@ function commitmentCard(c, commitment) {
           ? `✓ ${money(target)} monthly goal met`
           : `✓ Paid for ${monthName(app.period).split(' ')[0]}`;
   } else if (!target) {
-    statusText = 'No monthly target set';
+    statusText = ['bill', 'loan'].includes(t) ? 'No payment scheduled this month' : 'No monthly target set';
   } else if (t === 'saving') {
     statusText = `${money(remaining)} left to save this month`;
   } else if (t === 'investment') {
@@ -637,12 +640,12 @@ function commitmentCard(c, commitment) {
   const inv = t === 'investment' ? app.data.derived.investments.find(i => i.categoryId === c.id) : null;
   const invNet = inv ? (inv.netInvestedPaise ?? Math.max(0, (inv.openingCostPaise || 0) + (inv.putInPaise || 0) - (inv.tookOutPaise || 0))) : 0;
   const invDisplay = inv ? (inv.worthPaise ?? invNet) : 0;
-  const totalSavedInBucket = Math.max(0, c.balancePaise) + (c.openingSavedPaise || 0);
+  const totalSavedInBucket = Math.max(0, c.balancePaise) + (c.externalSavedPaise ?? c.openingSavedPaise ?? 0);
 
   const primaryLabel = t === 'saving'
     ? 'Total saved'
     : t === 'investment'
-      ? (inv?.worthPaise != null ? 'Current worth' : 'Total invested')
+      ? (inv?.worthPaise != null ? (inv.worthStale ? 'Last known worth' : `Worth · ${shortDate(inv.worthDate)}`) : 'Total invested')
       : 'Cash set aside';
   const primaryValue = t === 'saving'
     ? totalSavedInBucket
@@ -737,7 +740,8 @@ function investmentView() {
   const commitments = new Map(app.data.derived.commitments.map(c => [c.categoryId, c]));
   const netInv = i => i.netInvestedPaise ?? Math.max(0, (i.openingCostPaise || 0) + (i.putInPaise || 0) - (i.tookOutPaise || 0));
   const totalInvested = investments.reduce((n, i) => n + netInv(i), 0);
-  const totalWorth = investments.reduce((n, i) => n + (i.worthPaise ?? netInv(i)), 0);
+  const portfolio = app.data.derived.investmentTotals;
+  const totalWorth = portfolio.estimatedWorthPaise;
   const totalCashWaiting = investments.reduce((n, i) => n + Math.max(0, cat(i.categoryId)?.balancePaise || 0), 0);
   const knownGains = investments.filter(i => i.gainPaise != null);
   const totalGain = knownGains.length ? knownGains.reduce((n, i) => n + i.gainPaise, 0) : null;
@@ -767,11 +771,11 @@ function investmentView() {
             <strong>${money(totalInvested)}</strong>
           </div>
           <div>
-            <span>Portfolio market worth</span>
+            <span>${portfolio.worthComplete ? 'Portfolio market worth' : 'Portfolio value · incomplete'}</span>
             <strong>${money(totalWorth)}</strong>
           </div>
           <div>
-            <span>Total gain / loss</span>
+            <span>${portfolio.gainComplete ? 'Total gain / loss' : `Known gain / loss (${portfolio.gainCount}/${portfolio.count})`}</span>
             <strong class="${totalGain > 0 ? 'positive' : totalGain < 0 ? 'negative' : ''}">${totalGain == null ? '—' : `${totalGain >= 0 ? '+' : ''}${money(totalGain)}`}</strong>
           </div>
         </div>
@@ -806,8 +810,8 @@ function investmentView() {
                     <strong>${money(investedPrincipal)}</strong>
                   </div>
                   <div class="investment-metric">
-                    <span>Market worth</span>
-                    <strong>${i.worthPaise == null ? `${money(investedPrincipal)}*` : money(i.worthPaise)}</strong>
+                    <span>${i.worthStale ? 'Last known worth' : i.worthDate ? `Worth · ${shortDate(i.worthDate)}` : 'Value unavailable'}</span>
+                    <strong>${i.worthPaise == null ? '—' : money(i.worthPaise)}</strong>
                   </div>
                   <div class="investment-metric">
                     <span>Gain / loss</span>
@@ -815,7 +819,7 @@ function investmentView() {
                   </div>
                 </div>
                 <div class="investment-actions">
-                  ${!i.archived ? button('Invest', 'expense', `data-id="${i.categoryId}"`, 'small ghost') : ''}
+                  ${!i.archived ? button('Invest', 'expense', `data-id="${i.categoryId}"`, 'small ghost') : button('Record withdrawal', 'withdraw', `data-id="${i.categoryId}"`, 'small ghost')}
                   ${button('Update worth', 'worth', `data-id="${i.categoryId}"`, 'small ghost')}
                 </div>
               </div>`;
@@ -904,6 +908,7 @@ function planView() {
         </div>
       </div>` : ''}
 
+    <p class="hint">Funded months keep their saved rules. New bills start in their first due month; use bill Details to change an existing bill this month. Scheduled bills are funded in their due month.</p>
     <form data-form="plan" id="plan-form" novalidate>
       <div class="plan-controls">
         ${amountField('Expected monthly take-home salary', 'income', rupees(s.monthlyIncomePaise))}
@@ -1036,6 +1041,17 @@ function planView() {
     </form>`;
 }
 
+function billScheduleFields(c = {}) {
+  return `<label class="field"><span>Bill frequency (amount per payment)</span>
+    <select name="frequency">${[['monthly','Monthly'],['quarterly','Every 3 months'],['yearly','Yearly'],['once','One-off']].map(([v,l]) => `<option value="${v}" ${(c.frequency || 'monthly') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label class="field"><span>First due month</span><input name="startPeriod" type="month" value="${c.startPeriod || (c.id ? '' : currentMonth())}"></label>
+    <label class="field"><span>Last due month (optional)</span><input name="endPeriod" type="month" value="${c.endPeriod || ''}"></label>`;
+}
+
+function priorityField(c = {}) {
+  return `<label class="field"><span>Funding priority</span><select name="priority"><option value="">Use bucket type priority</option>${[1,2,3,4].map(v => `<option value="${v}" ${c.priority === v ? 'selected' : ''}>${v}${v === 1 ? ' — first' : v === 4 ? ' — last' : ''}</option>`).join('')}</select></label>`;
+}
+
 function planRow(c) {
   const optionsId = `options-${c.id || Math.random().toString(36).slice(2, 9)}`;
   const btId = catBucketTypeId(c);
@@ -1047,7 +1063,7 @@ function planRow(c) {
   const pctVal = fixed ? 0 : Number(c.percent ?? 0);
 
   const metaParts = [
-    fixed ? 'Fixed ₹ / month' : 'Self-adjusting % share',
+    fixed ? (['bill', 'loan'].includes(behavior) ? `₹ per ${c.frequency || 'monthly'} payment` : 'Fixed ₹ / month') : 'Self-adjusting % share',
     c.rollover ? 'Rolls over unused cash' : 'Resets monthly',
     c.capPaise != null ? `Cap ${money(c.capPaise)}` : '',
     c.dueDay ? `Due day ${c.dueDay}` : ''
@@ -1094,10 +1110,12 @@ function planRow(c) {
                   ${sameKindTypes.map(item => `<option value="${esc(item.id)}" ${item.id === bt.id ? 'selected' : ''}>${esc(item.icon)} ${esc(item.name)}</option>`).join('')}
                 </select>
               </label>` : ''}
+            ${priorityField(c)}
             ${amountField('Maximum bucket cap (optional)', 'cap', rupees(c.capPaise), false, 'No limit')}
             ${behavior === 'investment' ? amountField('Already invested before Khaata', 'openingCost', c.openingCostPaise ? rupees(c.openingCostPaise) : '', false, '0') : ''}
-            ${behavior === 'saving' ? amountField('Already saved outside this bank', 'openingSaved', c.openingSavedPaise ? rupees(c.openingSavedPaise) : '', false, '0') : ''}
+            ${behavior === 'saving' ? amountField('Opening external savings (before Khaata)', 'openingSaved', c.openingSavedPaise ? rupees(c.openingSavedPaise) : '', false, '0') : ''}
             ${['bill', 'loan'].includes(behavior) ? `
+              ${billScheduleFields(c)}
               <label class="field">
                 <span>Due day of month (1–31)</span>
                 <input name="dueDay" type="number" min="1" max="31" step="1" placeholder="Optional" value="${c.dueDay || ''}">
@@ -1109,6 +1127,7 @@ function planRow(c) {
                 <input name="rollover" type="checkbox" ${c.rollover ? 'checked' : ''}>
                 Keep leftover cash for next month
               </label>
+              ${behavior === 'spending' ? `<label class="check"><input name="includeInDailyGuide" type="checkbox" ${(c.includeInDailyGuide ?? !c.rollover) ? 'checked' : ''}>Include in daily spending guide</label>` : ''}
               ${['bill', 'loan'].includes(behavior) && app.data.settings.planConfirmed === false ? `
                 <label class="check highlight-check">
                   <input name="alreadyPaid" type="checkbox" ${paid ? 'checked' : ''}>
@@ -1231,6 +1250,11 @@ function collectPlan() {
         rollover: $('[name=rollover]', row).checked,
         capPaise: $('[name=cap]', row).value === '' ? null : paise($('[name=cap]', row).value),
         dueDay: Number($('[name=dueDay]', row)?.value) || null,
+        frequency: $('[name=frequency]', row)?.value || 'monthly',
+        startPeriod: $('[name=startPeriod]', row)?.value || null,
+        endPeriod: $('[name=endPeriod]', row)?.value || null,
+        priority: $('[name=priority]', row)?.value ? Number($('[name=priority]', row).value) : null,
+        includeInDailyGuide: Boolean($('[name=includeInDailyGuide]', row)?.checked),
         openingCostPaise: $('[name=openingCost]', row) && $('[name=openingCost]', row).value !== '' ? paise($('[name=openingCost]', row).value) : undefined,
         openingSavedPaise: $('[name=openingSaved]', row) && $('[name=openingSaved]', row).value !== '' ? paise($('[name=openingSaved]', row).value) : undefined,
         alreadyPaid: Boolean($('[name=alreadyPaid]', row)?.checked),
@@ -1245,11 +1269,13 @@ function updatePlanTotal() {
   const f = $('#plan-form');
   if (!f) return;
   const p = collectPlan();
-  const fixed = p.categories.filter(c => c.kind === 'fixed').reduce((n, c) => n + c.targetPaise, 0);
+  const previewPeriod = app.period >= currentMonth() ? app.period : currentMonth();
+  const fixed = p.categories.filter(c => c.kind === 'fixed').reduce((n, c) => n + (['bill', 'loan'].includes(c.type) ? scheduledAmount(c, previewPeriod) : c.targetPaise), 0);
+  const peak = peakFixedPlan(p.categories, currentMonth());
   const share = p.categories.filter(c => c.kind === 'flex').reduce((n, c) => n + c.percent, 0);
   const hasFlex = p.categories.some(c => c.kind === 'flex');
   const shareValid = !hasFlex || Math.abs(share - 100) < 0.01;
-  const valid = p.monthlyIncomePaise > 0 && fixed <= p.monthlyIncomePaise && shareValid;
+  const valid = p.monthlyIncomePaise > 0 && peak.amountPaise <= p.monthlyIncomePaise && shareValid;
   const income = p.monthlyIncomePaise || 0;
   const spending = Math.max(0, income - fixed);
   const fixedPct = income ? Math.min(100, (fixed / income) * 100) : 0;
@@ -1273,7 +1299,7 @@ function updatePlanTotal() {
       const pctSum = rows.reduce((n, r) => n + Number($('[name=percent]', r)?.value || 0), 0);
       subtotalEl.textContent = `· ${Number(pctSum.toFixed(1))}% (${money(Math.round((spending * pctSum) / 100))}/mo)`;
     } else {
-      const rupeeSum = rows.reduce((n, r) => n + paise($('[name=target]', r)?.value || 0), 0);
+      const rupeeSum = p.categories.filter(c => c.bucketTypeId === btId).reduce((n,c) => n + (['bill', 'loan'].includes(c.type) ? scheduledAmount(c, previewPeriod) : c.targetPaise), 0);
       subtotalEl.textContent = `· ${money(rupeeSum)} / mo`;
     }
   }
@@ -1288,7 +1314,7 @@ function updatePlanTotal() {
   $('#plan-summary').innerHTML = `
     <div class="plan-totals">
       <div>
-        <span>1. Fixed commitments</span>
+        <span>1. Fixed commitments · ${shortMonth(previewPeriod)}</span>
         <strong>${money(fixed)}</strong>
         <small>${fixedPct.toFixed(0)}% of salary (${money(income)})</small>
       </div>
@@ -1307,7 +1333,7 @@ function updatePlanTotal() {
       <span style="width:${fixedPct}%"></span>
       <i style="width:${spendingPct}%"></i>
     </div>
-    ${!valid ? `<p class="negative plan-error">${fixed > income ? `Fixed commitments (${money(fixed)}) exceed your salary (${money(income)}). ` : ''}${!shareValid ? `Everyday spending percentages must add up to 100% (currently ${Number(share.toFixed(2))}%).` : ''}</p>` : ''}`;
+    ${!valid ? `<p class="negative plan-error">${peak.amountPaise > income ? `Fixed commitments in ${monthName(peak.period)} (${money(peak.amountPaise)}) exceed your salary (${money(income)}). ` : ''}${!shareValid ? `Everyday spending percentages must add up to 100% (currently ${Number(share.toFixed(2))}%).` : ''}</p>` : ''}`;
 
   const bar = $('.plan-save', f);
   if (bar) bar.hidden = !(app.dirty || app.data.settings.planConfirmed === false);
@@ -1653,7 +1679,7 @@ function openQuickAddBucket(preferredTypeId) {
         </label>
       </div>
       <div data-quick-target ${isFlex ? 'hidden' : ''}>
-        ${amountField('Monthly planned amount', 'target', '', false, 'e.g. 5000')}
+        ${amountField('Planned amount (per payment for bills)', 'target', '', false, 'e.g. 5000')}
       </div>
       <div data-quick-percent ${isFlex ? '' : 'hidden'}>
         <label class="field">
@@ -1667,7 +1693,10 @@ function openQuickAddBucket(preferredTypeId) {
           <input name="rollover" type="checkbox" ${initialBt?.defaultRollover ? 'checked' : ''}>
           <span>Keep leftover cash for next month</span>
         </label>
+        ${priorityField()}
         ${amountField('Maximum bucket cap (optional)', 'cap', rupees(initialBt?.defaultCapPaise), false, 'No limit')}
+        <div data-quick-schedule ${['bill', 'loan'].includes(initialBt?.behavior) ? '' : 'hidden'}>${billScheduleFields()}</div>
+        <label class="check" data-quick-daily ${isFlex ? '' : 'hidden'}><input name="includeInDailyGuide" type="checkbox" ${!initialBt?.defaultRollover ? 'checked' : ''}>Include in daily spending guide</label>
         <label class="field" data-quick-dueday ${['bill', 'loan'].includes(initialBt?.behavior) ? '' : 'hidden'}>
           <span>Due day of month (1–31, optional)</span>
           <input name="dueDay" type="number" min="1" max="31" step="1" value="${initialBt?.defaultDueDay || ''}">
@@ -1702,7 +1731,7 @@ const txTypeDescriptions = {
   withdraw: 'Money withdrawn from an investment or savings bucket back into your bank.'
 };
 
-function openTransaction({ id, categoryId, income = false, adjustmentId } = {}) {
+function openTransaction({ id, categoryId, income = false, adjustmentId, withdraw = false } = {}) {
   const t = id ? app.data.transactions.find(t => t.id === id) : null;
   if (t?.kind === 'adjustment') {
     openCorrection(t);
@@ -1712,7 +1741,7 @@ function openTransaction({ id, categoryId, income = false, adjustmentId } = {}) 
   const category = cat(t?.categoryId || categoryId);
   const initial = t
     ? txType(t)
-    : income
+    : withdraw ? 'withdraw' : income
       ? 'income'
       : category && ['saving', 'investment', 'loan'].includes(type(category))
         ? 'transfer'
@@ -1729,7 +1758,7 @@ function openTransaction({ id, categoryId, income = false, adjustmentId } = {}) 
 
   modal(
     t ? 'Edit transaction' : adjustment ? 'Identify balance difference' : 'Log bank transaction',
-    `<form class="tx-form" data-form="tx" data-id="${id || ''}" data-adjustment="${adjustmentId || ''}" novalidate>
+    `<form class="tx-form" data-form="tx" data-id="${id || ''}" data-adjustment="${adjustmentId || ''}" data-budget-override="${Boolean(t && (t.budgetPeriod || t.date.slice(0, 7)) !== t.date.slice(0, 7))}" novalidate>
       <div class="tx-type-pills" role="group" aria-label="Transaction type">
         ${typeOptions.map(([v, l]) => `<button type="button" class="tx-pill ${v === activeType ? 'active' : ''}" data-action="tx-type" data-type="${v}">${l.split(' / ')[0]}</button>`).join('')}
       </div>
@@ -1758,13 +1787,14 @@ function openTransaction({ id, categoryId, income = false, adjustmentId } = {}) 
         </label>
         <label class="field">
           <span>Counts toward budget month</span>
-          <input name="budgetPeriod" type="month" value="${t?.budgetPeriod || t?.date.slice(0, 7) || app.period}" required>
+          <input name="budgetPeriod" type="month" value="${t?.budgetPeriod || t?.date.slice(0, 7) || currentMonth()}" required>
         </label>
       </div>
       <label class="check highlight-check" data-field="settled" hidden>
-        <input name="settled" type="checkbox" ${!t || (app.data.billOverrides || []).some(b => b.categoryId === t.categoryId && b.period === (t.budgetPeriod || t.date.slice(0, 7)) && b.settled) ? 'checked' : ''}>
+        <input name="settled" type="checkbox" ${t && (app.data.billOverrides || []).some(b => b.categoryId === t.categoryId && b.period === (t.budgetPeriod || t.date.slice(0, 7)) && b.settled) ? 'checked' : ''}>
         Mark this month’s bill / EMI as fully paid (even if the amount differed from plan)
       </label>
+      <p class="hint" data-budget-warning hidden></p>
       <p class="hint bucket-warning" data-warning hidden></p>
       <div class="hint bucket-warning" data-correction-match hidden></div>
       <details class="form-details" ${t?.notes ? 'open' : ''}>
@@ -1790,7 +1820,7 @@ function updateTransactionFields() {
   const select = f.elements.categoryId;
   const selected = select.value || select.dataset.selected;
   const allowed = app.data.categories.filter(c =>
-    (!c.archived || c.id === selected) &&
+    (!c.archived || c.id === selected || ['withdraw', 'refund'].includes(k)) &&
     (['expense', 'refund'].includes(k)
       ? ['bill', 'spending'].includes(type(c))
       : ['saving', 'investment', 'loan'].includes(type(c)))
@@ -1820,7 +1850,7 @@ function updateTransactionFields() {
     groups.get(btName).push(c);
   }
   select.innerHTML = [...groups.entries()].map(([gName, items]) =>
-    `<optgroup label="${esc(gName)}">${items.map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.name)} (${money(c.balancePaise)} in bucket)</option>`).join('')}</optgroup>`
+    `<optgroup label="${esc(gName)}">${items.map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.name)}${c.archived ? ' (Paused; returns go to Unassigned)' : ` (${money(c.balancePaise)} in bucket)`}</option>`).join('')}</optgroup>`
   ).join('');
 
   if (!allowed.some(c => c.id === selected)) {
@@ -1838,6 +1868,13 @@ function updateTransactionFields() {
   updateTransactionWarning();
 }
 
+function syncTransactionPeriod(form, changedName) {
+  if (changedName === 'budgetPeriod') form.dataset.budgetOverride = 'true';
+  if (changedName === 'date' && form.dataset.budgetOverride !== 'true') {
+    form.elements.budgetPeriod.value = form.elements.date.value.slice(0, 7);
+  }
+}
+
 function updateTransactionWarning() {
   const f = $('[data-form=tx]');
   if (!f) return;
@@ -1852,6 +1889,11 @@ function updateTransactionWarning() {
   warning.hidden = !c || txMapping[k].direction === 'in' || k === 'income' || gap <= 0;
   warning.textContent = `Heads up: ${c?.name || 'This bucket'} only has ${money(balance)}, so it will be ${money(gap)} short. You can cover it afterwards using Move money.`;
 
+  const periodWarning = $('[data-budget-warning]', f);
+  if (periodWarning) {
+    periodWarning.hidden = f.elements.budgetPeriod.value === f.elements.date.value.slice(0, 7);
+    periodWarning.textContent = 'Cash moves on the entered date; this entry counts toward a different budget month. Keep this for early or late bill payments.';
+  }
   const match = $('[data-correction-match]', f);
   const correction = !f.dataset.id && !f.dataset.adjustment && app.data.transactions.find(t => t.kind === 'adjustment' && t.amountPaise === amount && t.direction === txMapping[k].direction);
   match.hidden = !correction;
@@ -1995,11 +2037,11 @@ function openBucket(id) {
     .slice(0, 5);
 
   const invNet = inv ? (inv.netInvestedPaise ?? Math.max(0, (inv.openingCostPaise || 0) + (inv.putInPaise || 0) - (inv.tookOutPaise || 0))) : 0;
-  const totalSaved = Math.max(0, c.balancePaise) + (c.openingSavedPaise || 0);
+  const totalSaved = Math.max(0, c.balancePaise) + (c.externalSavedPaise ?? c.openingSavedPaise ?? 0);
   const headlineLabel = t === 'saving'
     ? 'Total saved in this goal'
     : t === 'investment'
-      ? (inv?.worthPaise != null ? 'Current market worth' : 'Total invested (principal)')
+      ? (inv?.worthPaise != null ? (inv.worthStale ? 'Last known market worth' : `Market worth · ${shortDate(inv.worthDate)}`) : 'Total invested (principal)')
       : t === 'spending'
         ? 'Available in bucket'
         : 'Cash set aside in bucket';
@@ -2017,7 +2059,7 @@ function openBucket(id) {
          <p class="big-money ${headlineAmount < 0 ? 'negative' : ''}">${money(headlineAmount)}</p>
        </div>
        <div class="bucket-quick-actions">
-         ${button(t === 'spending' ? '+ Log expense' : ['bill', 'loan'].includes(t) ? 'Pay bill / EMI' : t === 'investment' ? 'Record SIP / invest' : 'Log transfer', 'expense', `data-id="${id}"`, 'primary small')}
+         ${button(c.archived ? 'Record withdrawal' : t === 'spending' ? '+ Log expense' : ['bill', 'loan'].includes(t) ? 'Pay bill / EMI' : t === 'investment' ? 'Record SIP / invest' : 'Log transfer', c.archived ? 'withdraw' : 'expense', `data-id="${id}"`, 'primary small')}
          ${t === 'investment' ? button('Update worth / prior cost', 'worth', `data-id="${id}"`, 'ghost small') : ''}
          ${button('⇄ Move money', 'move', `data-to="${id}"`, 'ghost small')}
        </div>
@@ -2031,7 +2073,7 @@ function openBucket(id) {
        ` : ''}
        ${t === 'saving' ? `
          <div><dt>Saved inside tracked bank account</dt><dd>${money(c.balancePaise)}</dd></div>
-         ${c.openingSavedPaise ? `<div><dt>Saved outside / before Khaata</dt><dd>${money(c.openingSavedPaise)}</dd></div>` : ''}
+         <div><dt>Saved outside this bank</dt><dd>${money(c.externalSavedPaise ?? c.openingSavedPaise ?? 0)}</dd></div>
        ` : ''}
        <div><dt>Monthly rule</dt><dd>${c.rollover ? 'Unused money rolls over to next month' : 'Resets every month'}</dd></div>
        ${c.capPaise != null ? `<div><dt>Maximum balance cap</dt><dd>${money(c.capPaise)}</dd></div>` : ''}
@@ -2039,9 +2081,9 @@ function openBucket(id) {
      </dl>
      ${t === 'saving' ? `
        <form class="bill-status-form" data-form="saving-opening" data-id="${id}" novalidate>
-         <h3>Pre-existing / external savings</h3>
-         ${amountField('Amount already saved outside your tracked bank balance', 'openingSaved', c.openingSavedPaise ? rupees(c.openingSavedPaise) : '', false, '0')}
-         <p class="fine">If part of your current bank balance belongs to ${esc(c.name)}, use <strong>⇄ Move money</strong> to move it from Unassigned. Use this field for savings held in a separate FD or external account.</p>
+         <h3>Check external savings balance</h3>
+         ${amountField('Current amount held outside your tracked bank', 'openingSaved', rupees(c.externalSavedPaise ?? c.openingSavedPaise ?? 0), false, '0')}
+         <p class="fine">If part of your current bank balance belongs to ${esc(c.name)}, use <strong>⇄ Move money</strong> to move it from Unassigned. Transfers and withdrawals update external savings automatically. Use this field to set or correct the external balance; older transfers are not added again.</p>
          ${actions('Save external amount')}
        </form>` : ''}
      ${commitment && ['bill', 'loan'].includes(t) ? `
@@ -2085,7 +2127,8 @@ function openWorth(id) {
   modal(
     `Update ${i.name} value`,
     `<form data-form="worth" data-id="${id}" novalidate>
-      ${amountField('Current market value of holdings', 'worth', rupees(i.worthPaise))}
+      ${amountField('Market value of holdings', 'worth', rupees(i.worthPaise))}
+      <label class="field"><span>Value as of</span><input name="valueDate" type="date" value="${today()}" min="${app.data.settings.openingDate || ''}" max="${today()}" required></label>
       <details class="form-details" ${!c.historyConfirmed ? 'open' : ''}>
         <summary>Opening holdings history (set once)</summary>
         <label class="field">
@@ -2228,6 +2271,9 @@ async function handleAction(el) {
       break;
     case 'expense':
       openTransaction({ categoryId: id });
+      break;
+    case 'withdraw':
+      openTransaction({ categoryId: id, withdraw: true });
       break;
     case 'income':
       openTransaction({ income: true });
@@ -2535,6 +2581,11 @@ document.addEventListener('submit', async event => {
         rollover,
         capPaise,
         dueDay: data.get('dueDay') ? Number(data.get('dueDay')) : null,
+        frequency: data.get('frequency') || 'monthly',
+        startPeriod: data.get('startPeriod') || null,
+        endPeriod: data.get('endPeriod') || null,
+        priority: data.get('priority') ? Number(data.get('priority')) : null,
+        includeInDailyGuide: data.get('includeInDailyGuide') === 'on',
         icon: data.get('icon') || bt?.icon || '🏷️',
         color: data.get('color') || bt?.color || '#23735f'
       });
@@ -2613,6 +2664,7 @@ document.addEventListener('submit', async event => {
     } else if (form === 'worth') {
       await change(`/api/investments/${f.dataset.id}/value`, {
         worthPaise: paise(data.get('worth')),
+        date: data.get('valueDate'),
         openingCostPaise: data.get('history') === 'new' ? 0 : data.get('history') === 'existing' && data.get('cost') !== '' ? paise(data.get('cost')) : null
       });
       close();
@@ -2652,7 +2704,10 @@ document.addEventListener('input', event => {
     app.dirty = true;
     updatePlanTotal();
   }
-  if (event.target.closest('[data-form=tx]')) updateTransactionWarning();
+  if (event.target.closest('[data-form=tx]')) {
+    syncTransactionPeriod(event.target.closest('[data-form=tx]'), event.target.name);
+    updateTransactionWarning();
+  }
   if (event.target.closest('[data-form=move]')) updateMoveWarning();
   if (event.target.dataset.control === 'search') {
     app.search = event.target.value;
@@ -2679,6 +2734,9 @@ document.addEventListener('change', async event => {
         $('[data-quick-target]', f).hidden = isFlex;
         $('[data-quick-percent]', f).hidden = !isFlex;
         $('[data-quick-dueday]', f).hidden = !['bill', 'loan'].includes(bt.behavior);
+        $('[data-quick-schedule]', f).hidden = !['bill', 'loan'].includes(bt.behavior);
+        $('[data-quick-daily]', f).hidden = !isFlex;
+        f.elements.includeInDailyGuide.checked = !bt.defaultRollover;
         f.elements.icon.value = bt.icon || '🏷️';
         f.elements.color.value = bt.color || '#23735f';
         f.elements.rollover.checked = Boolean(bt.defaultRollover);
@@ -2707,6 +2765,10 @@ document.addEventListener('change', async event => {
         app.dirty = true;
         updatePlanTotal();
       }
+    }
+    if (event.target.closest('[data-form=tx]') && ['date', 'budgetPeriod'].includes(event.target.name)) {
+      syncTransactionPeriod(event.target.closest('[data-form=tx]'), event.target.name);
+      updateTransactionWarning();
     }
     if (event.target.name === 'txType' || event.target.name === 'categoryId') updateTransactionFields();
     if (event.target.name === 'from') updateMoveWarning();

@@ -1,3 +1,4 @@
+import {scheduledAmount, peakFixedPlan} from '../public/schedule.js';
 // Runs against a disposable ledger; never opens data/store.json.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -18,6 +19,7 @@ try {
   return {status:response.status,data:await response.json()};
  };
  const ok=async(...args)=>{const response=await request(...args);assert.equal(response.status,200,JSON.stringify(response.data));return response.data;};
+ assert.equal((await fetch(`${base}/schedule.js`)).status,200);
  assert.deepEqual(await ok('/api/sync',undefined,'GET'),{enabled:false,state:'disabled',pending:false});
  let setup=await ok('/api/setup',{monthlyIncomePaise:10000000,openingBalancePaise:10000000});
  assert.equal(setup.state.derived.allocation,null);assert.equal(setup.state.settings.planConfirmed,false);
@@ -58,14 +60,47 @@ try {
  const current=await ok('/api/state',undefined,'GET');assert.equal(current.state.derived.safety.futureReservedPaise,7358245);
  assert.equal((await request('/api/allocate',{period:'2020-01'})).status,400);
 
+ // Real-life regressions through the same endpoints used by the existing forms.
+ await ok('/api/reset',{});
+ setup=await ok('/api/setup',{monthlyIncomePaise:10000000,openingBalancePaise:10000000});
+ p={monthlyIncomePaise:10000000,paydayDay:5,surplusCategoryId:'emergency',categories:setup.state.categories};
+ await ok('/api/plan',p,'PUT');await ok('/api/allocate',{period});
+ let result=await ok('/api/transactions',{date:today,kind:'expense',direction:'out',categoryId:'rent',amountPaise:500000,description:'Partial rent',settleBill:false});
+ assert.equal(result.state.derived.commitments.find(c=>c.categoryId==='rent').remainingPaise,1500000);
+ await ok('/api/transactions',{date:today,kind:'transfer',direction:'out',categoryId:'emergency',amountPaise:1300000,description:'Move savings to FD'});
+ result=await ok('/api/transactions',{date:today,kind:'transfer',direction:'in',categoryId:'emergency',amountPaise:300000,description:'FD withdrawal'});
+ assert.equal(result.state.categories.find(c=>c.id==='emergency').externalSavedPaise,1000000);
+ await ok('/api/transactions',{date:today,kind:'transfer',direction:'out',categoryId:'invest',amountPaise:1500000,description:'SIP'});
+ result=await ok('/api/investments/invest/value',{worthPaise:1600000,openingCostPaise:0,date:today});
+ assert.equal((await request('/api/bucket-types',{id:'investment',name:'Investments',behavior:'spending'})).status,400);
+ p={monthlyIncomePaise:10000000,paydayDay:5,surplusCategoryId:'emergency',categories:result.state.categories.filter(c=>!c.archived&&c.id!=='invest')};
+ p.categories.push({name:'Annual insurance',type:'bill',kind:'fixed',targetPaise:100000,frequency:'yearly',startPeriod:period,dueDay:31,priority:1});
+ result=await ok('/api/plan',p,'PUT');
+ const insurance=result.state.categories.find(c=>c.name==='Annual insurance');
+ assert.equal(result.state.derived.commitments.find(c=>c.categoryId===insurance.id).remainingPaise,100000);
+ result=await ok('/api/transactions',{date:today,kind:'transfer',direction:'in',categoryId:'invest',amountPaise:1600000,description:'Redeem paused holding'});
+ assert.equal(result.transaction.unassignedReturn,true);
+ assert.equal(result.state.categories.find(c=>c.id==='invest').balancePaise,0);
+ const upgraded=await (await fetch(`${base}/api/export`)).json();
+ result=await ok('/api/restore',upgraded);
+ assert.equal(result.state.categories.find(c=>c.id==='emergency').externalSavedPaise,1000000);
+ assert.equal(result.state.derived.investments.find(c=>c.categoryId==='invest').worthStale,true);
+ for(const corrupt of [
+  x=>{x.categories.find(c=>c.id==='invest').valuations[0].valuePaise=-1;},
+  x=>{x.categories.find(c=>c.id===insurance.id).frequency='weekly';},
+  x=>{x.transactions.find(t=>t.unassignedReturn).direction='out';},
+ ]){
+  const bad=structuredClone(upgraded);corrupt(bad);assert.equal((await request('/api/restore',bad)).status,400);
+ }
+
  // Execute all view functions without a browser. This catches template/runtime
  // errors; visual layout and native input behavior still need browser QA.
  const nodes=Object.fromEntries(['#app','#modal-root','#toast-root'].map(id=>[id,{innerHTML:'',append(){}}]));
- const context=vm.createContext({Intl,Date,JSON,Number,String,Math,Set,Map,FormData,confirm:()=>true,
+ const context=vm.createContext({scheduledAmount,peakFixedPlan,Intl,Date,JSON,Number,String,Math,Set,Map,FormData,confirm:()=>true,
   location:{origin:base,hash:'#dashboard'},sessionStorage:{getItem:()=>null,setItem(){}},
   window:{addEventListener(){},scrollTo(){}},document:{querySelector:s=>nodes[s]||null,querySelectorAll:()=>[],addEventListener(){},body:{classList:{add(){},remove(){}}},visibilityState:'hidden',activeElement:null},
   setInterval(){},setTimeout(){},fetch:(url,options)=>fetch(`${base}${url}`,options)});
- vm.runInContext(await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8'),context);
+ vm.runInContext((await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import[^\n]*\n/, ''),context);
  for(let n=0;n<100&&!vm.runInContext('Boolean(app.data)',context);n++)await new Promise(resolve=>setTimeout(resolve,10));
  assert.ok(vm.runInContext('Boolean(app.data)',context));
  for(const view of ['dashboard','plan','transactions','settings']){
@@ -73,7 +108,7 @@ try {
  }
  vm.runInContext("openTransaction();openFunding();openReconcile();openWorth('invest');openBucketType();openQuickAddBucket('investment');help()",context);
  assert.ok(nodes['#modal-root'].innerHTML.includes('How Khaata works'));
- console.log('API smoke checks passed: setup, exact amounts, paid bills, classification, reversals, restore, partial funding, next-month reservations, and view rendering.');
+ console.log('API checks passed: setup, funding, partial bills, schedules, savings transfers, paused redemptions, dated valuations, backup validation, shared module delivery, and view rendering.');
 } finally {
  await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});
 }
