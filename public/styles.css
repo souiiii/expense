@@ -391,6 +391,13 @@ input[type=checkbox] {
   accent-color: var(--green);
 }
 
+input[type=color] {
+  width: 100%;
+  height: 41px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
 select {
   appearance: none;
   background-image:
@@ -456,6 +463,13 @@ select {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+
+.form-grid-icon-color {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px 86px;
+  gap: 12px;
+  align-items: end;
 }
 
 .form-details {
@@ -896,7 +910,11 @@ select {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.bank-equation-5 {
+  grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
 }
 
 .bank-eq-total,
@@ -960,6 +978,7 @@ select {
 }
 
 .dot-safe { background: #6fd19f; }
+.dot-savings { background: #58c4c6; }
 .dot-reserved { background: #7fb4d9; }
 .dot-unassigned { background: #e8c170; }
 
@@ -972,8 +991,60 @@ select {
 }
 
 .bank-bar-safe { background: #6fd19f; }
+.bank-bar-savings { background: #58c4c6; }
 .bank-bar-reserved { background: #7fb4d9; }
 .bank-bar-unassigned { background: #e8c170; }
+
+/* ------------------------------------------------------------------ */
+/* Savings & Investments Wealth Strip                                 */
+/* ------------------------------------------------------------------ */
+
+.wealth-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 24px;
+}
+
+.wealth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 15px 17px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.wealth-card-highlight {
+  border-color: #c5d6c0;
+  background: #eff5eb;
+}
+
+.wealth-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wealth-value {
+  font: 24px/1.1 var(--font-display);
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.wealth-card-highlight .wealth-value {
+  color: var(--forest);
+}
+
+.wealth-sub {
+  color: var(--muted);
+  font-size: 11.5px;
+}
 
 /* ------------------------------------------------------------------ */
 /* Month Cashflow Strip                                               */
@@ -1092,6 +1163,13 @@ select {
   color: #fffdf7;
 }
 
+.type-chip-add {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--forest);
+}
+
 .empty {
   margin: 0;
   padding: 28px 16px;
@@ -1100,6 +1178,18 @@ select {
   color: var(--muted);
   font-size: 13px;
   text-align: center;
+}
+
+.empty-wide {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.empty-wide p {
+  margin: 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1169,8 +1259,13 @@ select {
   display: inline-flex;
   align-items: center;
   height: 22px;
+  max-width: 130px;
+  flex: none;
   padding: 0 8px;
   border-radius: 999px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1433,6 +1528,10 @@ select {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface-soft);
+}
+
+.investment-summary-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .investment-summary-bar > div {
@@ -1885,6 +1984,18 @@ select {
   background: var(--surface-soft);
 }
 
+.plan-rows:empty {
+  border-style: dashed;
+  padding: 18px 14px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.plan-rows:empty::before {
+  content: "No buckets in this type yet — click + Add bucket above to add one.";
+}
+
 .plan-line {
   border-top: 1px solid var(--line);
 }
@@ -1895,7 +2006,7 @@ select {
 
 .plan-line-main {
   display: grid;
-  grid-template-columns: 36px minmax(140px, 1fr) minmax(190px, 1.3fr) 116px auto;
+  grid-template-columns: 36px minmax(140px, 1fr) minmax(220px, 1.35fr) 116px auto;
   gap: 12px;
   align-items: center;
   padding: 11px 14px;
@@ -1909,19 +2020,44 @@ select {
 .plan-slider-wrap {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
 }
 
 .percent-slider {
+  -webkit-appearance: none;
+  appearance: none;
   flex: 1;
   min-width: 80px;
   height: 6px;
   padding: 0;
   border: 0;
-  background: #dfe6dc;
+  border-radius: 999px;
+  background: #dce5d8;
   accent-color: var(--forest);
   cursor: pointer;
+}
+
+.percent-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--forest);
+  border: 2px solid #fffdf8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: grab;
+}
+
+.percent-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--forest);
+  border: 2px solid #fffdf8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: grab;
 }
 
 .percent-slider:focus {
@@ -1953,8 +2089,8 @@ select {
 }
 
 .small-field input[type="color"] {
-  height: 40px;
-  padding: 4px;
+  height: 41px;
+  padding: 4px 6px;
   cursor: pointer;
 }
 
@@ -2055,6 +2191,8 @@ select {
 }
 
 .plan-calc-rupees {
+  min-width: 102px;
+  text-align: right;
   color: var(--green);
   font-size: 12.5px;
   font-weight: 650;
@@ -2098,24 +2236,42 @@ select {
 
 .plan-options {
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 12px;
   padding-top: 13px;
 }
 
-.plan-options .field {
-  min-width: 170px;
+.plan-options-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
 }
 
-.plan-options .check {
-  align-self: center;
-  min-height: 36px;
+.plan-options-grid .field {
+  min-width: 165px;
+  flex: 1;
 }
 
-.plan-options .btn {
-  margin-left: auto;
-  color: var(--danger);
+.plan-options-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.plan-options-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.danger-text {
+  color: var(--danger) !important;
 }
 
 .plan-advanced {
@@ -2922,12 +3078,15 @@ details[open] > summary::after {
     padding: 30px 28px 60px;
   }
 
-  .envelope-grid {
+  .envelope-grid,
+  .wealth-strip,
+  .investment-summary-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .bank-equation {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .bank-equation,
+  .bank-equation-5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .bank-eq-sign {
@@ -3033,7 +3192,9 @@ details[open] > summary::after {
     min-width: 0;
   }
 
-  .bank-equation {
+  .bank-equation,
+  .bank-equation-5,
+  .wealth-strip {
     grid-template-columns: 1fr 1fr;
     gap: 8px;
   }
@@ -3061,6 +3222,7 @@ details[open] > summary::after {
   .overview-lower,
   .settings-grid,
   .form-grid,
+  .form-grid-icon-color,
   .tx-form .tx-top {
     grid-template-columns: 1fr;
   }

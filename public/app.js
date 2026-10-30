@@ -33,11 +33,11 @@ const type = c => c.type || (c.kind === 'flex' ? 'spending' : 'bill');
 const currentMonth = () => today().slice(0, 7);
 const historical = () => app.period < currentMonth();
 
-const DEFAULT_BUCKET_TYPES = [
+  const DEFAULT_BUCKET_TYPES = [
   { id: 'bill', name: 'Bills & Utilities', description: 'Rent, electricity, broadband, and fixed monthly bills.', kind: 'fixed', behavior: 'bill', defaultRollover: false, defaultCapPaise: null, defaultDueDay: null, allowSurplus: false, priority: 1, icon: '🏠', color: '#b4643c' },
   { id: 'loan', name: 'Loans & EMIs', description: 'EMIs and fixed monthly repayments to lenders.', kind: 'fixed', behavior: 'loan', defaultRollover: false, defaultCapPaise: null, defaultDueDay: null, allowSurplus: true, priority: 1, icon: '🏦', color: '#7d6a9e' },
   { id: 'saving', name: 'Savings Goals', description: 'Emergency fund and cash reserves kept in your bank.', kind: 'fixed', behavior: 'saving', defaultRollover: true, defaultCapPaise: null, defaultDueDay: null, allowSurplus: true, priority: 3, icon: '🛡️', color: '#3f6b8e' },
-  { id: 'investment', name: 'Investments', description: 'SIPs, PPF, stocks, gold, and holdings tracked separately from bank cash.', kind: 'fixed', behavior: 'investment', defaultRollover: true, defaultCapPaise: 3000000, defaultDueDay: null, allowSurplus: true, priority: 4, icon: '📈', color: '#23735f' },
+  { id: 'investment', name: 'Investments', description: 'SIPs, PPF, stocks, gold, and holdings tracked separately from bank cash.', kind: 'fixed', behavior: 'investment', defaultRollover: true, defaultCapPaise: null, defaultDueDay: null, allowSurplus: true, priority: 4, icon: '📈', color: '#23735f' },
   { id: 'spending', name: 'Everyday Spending', description: 'What is left after fixed commitments, split by percentage.', kind: 'flex', behavior: 'spending', defaultRollover: false, defaultCapPaise: null, defaultDueDay: null, allowSurplus: false, priority: 2, icon: '🛒', color: '#6c8a45' }
 ];
 
@@ -416,10 +416,11 @@ function dashboardView() {
   const everyday = active().filter(c => type(c) === 'spending');
   const doneCount = fixed.filter(c => ['done', 'at-goal'].includes(commitments.get(c.id)?.status)).length;
 
-  const fixedBucketTypes = bucketTypes().filter(bt => bt.kind === 'fixed' && fixed.some(c => catBucketTypeId(c) === bt.id));
+  const fixedBucketTypes = bucketTypes().filter(bt => bt.kind === 'fixed');
   const filteredFixed = app.typeFilter === 'all' || !fixedBucketTypes.some(bt => bt.id === app.typeFilter)
     ? fixed
     : fixed.filter(c => catBucketTypeId(c) === app.typeFilter);
+  const selectedFilterBt = app.typeFilter !== 'all' ? findBucketType(app.typeFilter) : null;
 
   const heroSub = historical()
     ? `Remaining in everyday spending buckets at the end of ${monthName(app.period)}`
@@ -429,10 +430,25 @@ function dashboardView() {
         ? 'Money available in your everyday spending buckets'
         : `${money(s.dailyPaise)} / day · ${s.daysToPayday} day${s.daysToPayday === 1 ? '' : 's'} until payday`;
 
+  const savingCats = active().filter(c => type(c) === 'saving');
+  const inBankSavings = savingCats.reduce((n, c) => n + Math.max(0, c.balancePaise), 0);
+  const openingExternalSavings = savingCats.reduce((n, c) => n + (c.openingSavedPaise || 0), 0);
+  const totalSavings = inBankSavings + openingExternalSavings;
+
+  const investments = d.investments || [];
+  const netInv = i => i.netInvestedPaise ?? Math.max(0, (i.openingCostPaise || 0) + (i.putInPaise || 0) - (i.tookOutPaise || 0));
+  const totalInvestedPrincipal = investments.reduce((n, i) => n + netInv(i), 0);
+  const totalEffectiveWorth = investments.reduce((n, i) => n + (i.worthPaise ?? netInv(i)), 0);
+  const totalCashWaitingToInvest = investments.reduce((n, i) => n + Math.max(0, cat(i.categoryId)?.balancePaise || 0), 0);
+  const knownGains = investments.filter(i => i.gainPaise != null);
+  const totalGain = knownGains.length ? knownGains.reduce((n, i) => n + i.gainPaise, 0) : null;
+  const billsAndSipReserve = Math.max(0, s.reservedPaise - inBankSavings);
+
   const totalBank = Math.max(1, d.bankBalancePaise);
   const safePct = Math.max(0, Math.min(100, (s.safeToSpendPaise / totalBank) * 100));
-  const reservedPct = Math.max(0, Math.min(100 - safePct, (s.reservedPaise / totalBank) * 100));
-  const unallocPct = Math.max(0, Math.min(100 - safePct - reservedPct, (Math.max(0, d.unallocatedPaise) / totalBank) * 100));
+  const savingsPct = Math.max(0, Math.min(100 - safePct, (inBankSavings / totalBank) * 100));
+  const reservedPct = Math.max(0, Math.min(100 - safePct - savingsPct, (billsAndSipReserve / totalBank) * 100));
+  const unallocPct = Math.max(0, Math.min(100 - safePct - savingsPct - reservedPct, (Math.max(0, d.unallocatedPaise) / totalBank) * 100));
 
   const showFundBtn = !historical() && app.data.settings.planConfirmed !== false && (!d.allocation || d.allocation.remainingPaise > 0);
 
@@ -459,7 +475,7 @@ function dashboardView() {
         ${button('✓ Match bank', 'reconcile', '', 'hero-ghost')}
       </div>
       <div class="hero-foot">
-        <div class="bank-equation">
+        <div class="bank-equation bank-equation-5">
           <div class="bank-eq-total">
             <span class="bank-eq-label">Total in bank</span>
             <strong>${money(d.bankBalancePaise)}</strong>
@@ -473,9 +489,15 @@ function dashboardView() {
           </div>
           <span class="bank-eq-sign" aria-hidden="true">+</span>
           <div class="bank-eq-part">
-            <span class="bank-eq-label"><i class="dot dot-reserved"></i>Bills &amp; goals</span>
-            <strong>${money(s.reservedPaise)}</strong>
-            <small>${s.futureReservedPaise ? `Includes ${money(s.futureReservedPaise)} for next mo` : 'Set aside in buckets'}</small>
+            <span class="bank-eq-label"><i class="dot dot-savings"></i>Cash savings</span>
+            <strong>${money(inBankSavings)}</strong>
+            <small>Savings buckets in bank</small>
+          </div>
+          <span class="bank-eq-sign" aria-hidden="true">+</span>
+          <div class="bank-eq-part">
+            <span class="bank-eq-label"><i class="dot dot-reserved"></i>Bills &amp; SIP cash</span>
+            <strong>${money(billsAndSipReserve)}</strong>
+            <small>${s.futureReservedPaise ? `Includes ${money(s.futureReservedPaise)} next mo` : 'Set aside for bills & SIPs'}</small>
           </div>
           <span class="bank-eq-sign" aria-hidden="true">+</span>
           <div class="bank-eq-part ${d.unallocatedPaise < 0 ? 'is-negative' : d.unallocatedPaise > 0 ? 'is-warm' : ''}">
@@ -486,26 +508,35 @@ function dashboardView() {
         </div>
         <div class="bank-bar" aria-hidden="true">
           <span class="bank-bar-safe" style="width:${safePct}%"></span>
+          <span class="bank-bar-savings" style="width:${savingsPct}%"></span>
           <span class="bank-bar-reserved" style="width:${reservedPct}%"></span>
           <span class="bank-bar-unassigned" style="width:${unallocPct}%"></span>
         </div>
       </div>
     </section>
 
-    <div class="month-flow-strip">
-      <div class="flow-stat">
-        <span>Income logged in ${monthName(app.period).split(' ')[0]}</span>
-        <strong class="${d.summary.incomePaise > 0 ? 'positive' : ''}">${money(d.summary.incomePaise)}</strong>
+    <section class="wealth-strip" aria-label="Savings and investments summary">
+      <div class="wealth-card">
+        <span class="wealth-label">Current Savings</span>
+        <strong class="wealth-value">${money(totalSavings)}</strong>
+        <small class="wealth-sub">${savingCats.length} savings bucket${savingCats.length === 1 ? '' : 's'}${openingExternalSavings > 0 ? ` (${money(inBankSavings)} in bank)` : ' in bank'}</small>
       </div>
-      <div class="flow-stat">
-        <span>Spent in ${monthName(app.period).split(' ')[0]}</span>
-        <strong>${money(d.summary.grossSpentPaise)}</strong>
+      <div class="wealth-card">
+        <span class="wealth-label">Total Invested (Put In)</span>
+        <strong class="wealth-value">${money(totalInvestedPrincipal)}</strong>
+        <small class="wealth-sub">${totalCashWaitingToInvest > 0 ? `+ ${money(totalCashWaitingToInvest)} waiting in bucket for SIP` : `Principal across ${investments.length} holding${investments.length === 1 ? '' : 's'}`}</small>
       </div>
-      <div class="flow-stat">
-        <span>Saved &amp; invested in ${monthName(app.period).split(' ')[0]}</span>
-        <strong>${money(Math.max(0, d.summary.savedPaise))}</strong>
+      <div class="wealth-card">
+        <span class="wealth-label">Portfolio Market Worth</span>
+        <strong class="wealth-value">${money(totalEffectiveWorth)}</strong>
+        <small class="wealth-sub ${totalGain > 0 ? 'positive' : totalGain < 0 ? 'negative' : ''}">${totalGain != null ? `${totalGain >= 0 ? '+' : ''}${money(totalGain)} gain / loss` : 'At cost basis · update worth below'}</small>
       </div>
-    </div>
+      <div class="wealth-card wealth-card-highlight">
+        <span class="wealth-label">Savings + Investments</span>
+        <strong class="wealth-value">${money(totalSavings + totalEffectiveWorth)}</strong>
+        <small class="wealth-sub">Spent in ${monthName(app.period).split(' ')[0]}: ${money(d.summary.grossSpentPaise)}</small>
+      </div>
+    </section>
 
     <section class="panel commitments-panel">
       <div class="panel-head">
@@ -521,16 +552,21 @@ function dashboardView() {
           ${button('Manage plan & types', 'nav', 'data-view="plan"', 'small ghost')}
         </div>
       </div>
-      ${fixedBucketTypes.length > 1 ? `
+      ${fixedBucketTypes.length > 0 ? `
         <div class="type-filter-bar" role="tablist" aria-label="Filter by bucket type">
           <button type="button" class="type-chip ${app.typeFilter === 'all' ? 'active' : ''}" data-action="filter-type" data-id="all">All types (${fixed.length})</button>
           ${fixedBucketTypes.map(bt => {
             const count = fixed.filter(c => catBucketTypeId(c) === bt.id).length;
             return `<button type="button" class="type-chip ${app.typeFilter === bt.id ? 'active' : ''}" data-action="filter-type" data-id="${esc(bt.id)}">${esc(bt.icon)} ${esc(bt.name)} (${count})</button>`;
           }).join('')}
+          <button type="button" class="type-chip type-chip-add" data-action="open-bucket-type" data-kind="fixed">+ New type</button>
         </div>` : ''}
       <div class="commitment-grid">
-        ${filteredFixed.map(c => commitmentCard(c, commitments.get(c.id))).join('') || '<p class="empty">Add a bill, loan, saving, or investment bucket in your Monthly Plan.</p>'}
+        ${filteredFixed.map(c => commitmentCard(c, commitments.get(c.id))).join('') || `
+          <div class="empty empty-wide">
+            <p>${selectedFilterBt ? `No buckets in "${esc(selectedFilterBt.name)}" yet.` : 'Add a bill, loan, saving, or investment bucket to your plan.'}</p>
+            ${button(selectedFilterBt ? `+ Add bucket to ${selectedFilterBt.name}` : '+ Add bucket', 'quick-add-bucket', selectedFilterBt ? `data-type="${esc(selectedFilterBt.id)}"` : '', 'small primary')}
+          </div>`}
       </div>
     </section>
 
@@ -598,7 +634,25 @@ function commitmentCard(c, commitment) {
     statusText += ` · ${money(commitment.overduePaise)} overdue from earlier`;
   }
 
-  const primaryLabel = t === 'saving' ? 'Total saved in bucket' : t === 'investment' ? 'Cash waiting to invest' : 'Cash set aside';
+  const inv = t === 'investment' ? app.data.derived.investments.find(i => i.categoryId === c.id) : null;
+  const invNet = inv ? (inv.netInvestedPaise ?? Math.max(0, (inv.openingCostPaise || 0) + (inv.putInPaise || 0) - (inv.tookOutPaise || 0))) : 0;
+  const invDisplay = inv ? (inv.worthPaise ?? invNet) : 0;
+  const totalSavedInBucket = Math.max(0, c.balancePaise) + (c.openingSavedPaise || 0);
+
+  const primaryLabel = t === 'saving'
+    ? 'Total saved'
+    : t === 'investment'
+      ? (inv?.worthPaise != null ? 'Current worth' : 'Total invested')
+      : 'Cash set aside';
+  const primaryValue = t === 'saving'
+    ? totalSavedInBucket
+    : t === 'investment'
+      ? invDisplay
+      : c.balancePaise;
+  const secondaryLabel = t === 'investment' && c.balancePaise > 0 ? 'Cash ready for SIP' : 'Monthly plan';
+  const secondaryValue = t === 'investment' && c.balancePaise > 0
+    ? money(c.balancePaise)
+    : (target > 0 ? money(target) : '—');
 
   return `
     <article class="commitment-card ${complete ? 'is-done' : ''} ${commitment?.overduePaise ? 'is-overdue' : ''}" style="--accent:${esc(c.color)}">
@@ -617,11 +671,11 @@ function commitmentCard(c, commitment) {
       <div class="commitment-figures">
         <div class="commitment-figure">
           <span>${primaryLabel}</span>
-          <strong class="commitment-amount ${c.balancePaise < 0 ? 'negative' : ''}">${money(c.balancePaise)}</strong>
+          <strong class="commitment-amount ${primaryValue < 0 ? 'negative' : ''}">${money(primaryValue)}</strong>
         </div>
         <div class="commitment-figure right">
-          <span>Monthly plan</span>
-          <strong>${target > 0 ? money(target) : '—'}</strong>
+          <span>${secondaryLabel}</span>
+          <strong>${secondaryValue}</strong>
         </div>
       </div>
 
@@ -681,7 +735,9 @@ function investmentView() {
   const investments = app.data.derived.investments;
   if (historical()) return '';
   const commitments = new Map(app.data.derived.commitments.map(c => [c.categoryId, c]));
-  const totalWorth = investments.reduce((n, i) => n + (i.worthPaise || 0), 0);
+  const netInv = i => i.netInvestedPaise ?? Math.max(0, (i.openingCostPaise || 0) + (i.putInPaise || 0) - (i.tookOutPaise || 0));
+  const totalInvested = investments.reduce((n, i) => n + netInv(i), 0);
+  const totalWorth = investments.reduce((n, i) => n + (i.worthPaise ?? netInv(i)), 0);
   const totalCashWaiting = investments.reduce((n, i) => n + Math.max(0, cat(i.categoryId)?.balancePaise || 0), 0);
   const knownGains = investments.filter(i => i.gainPaise != null);
   const totalGain = knownGains.length ? knownGains.reduce((n, i) => n + i.gainPaise, 0) : null;
@@ -693,7 +749,7 @@ function investmentView() {
         <div>
           <span class="section-step">Multi-Bucket Portfolio · Outside bank cash</span>
           <h2>Investment Buckets &amp; Holdings (${investments.length})</h2>
-          <p class="panel-sub">Add separate buckets for each SIP, PPF, stock, or gold holding. Bucket cash is what is waiting in your bank to invest; Worth is the market value of the holding.</p>
+          <p class="panel-sub">Total invested updates automatically whenever you log a SIP or set your opening holdings. Update market worth anytime to track gain/loss.</p>
         </div>
         <div class="panel-head-actions">
           ${button('+ Add investment bucket', 'quick-add-bucket', `data-type="${esc(invBucketType)}"`, 'small primary')}
@@ -701,10 +757,14 @@ function investmentView() {
       </div>
 
       ${investments.length ? `
-        <div class="investment-summary-bar">
+        <div class="investment-summary-bar investment-summary-4">
           <div>
-            <span>Cash waiting to invest</span>
+            <span>Cash waiting for SIP</span>
             <strong>${money(totalCashWaiting)}</strong>
+          </div>
+          <div>
+            <span>Total invested (put in)</span>
+            <strong>${money(totalInvested)}</strong>
           </div>
           <div>
             <span>Portfolio market worth</span>
@@ -720,9 +780,10 @@ function investmentView() {
             const c = cat(i.categoryId);
             const commitment = commitments.get(i.categoryId);
             const cashInBucket = c?.balancePaise || 0;
+            const investedPrincipal = netInv(i);
             const gain = i.gainPaise;
             const gainText = gain == null
-              ? (i.worthStale ? 'Needs value update' : i.historyComplete ? 'Enter current worth' : 'Set opening cost')
+              ? (i.worthStale ? 'Update worth' : i.worthPaise == null ? 'Enter worth' : 'Set prior cost')
               : `${gain >= 0 ? '+' : ''}${money(gain)}`;
             return `
               <div class="investment-row">
@@ -731,11 +792,9 @@ function investmentView() {
                   <button type="button" class="commitment-name" data-action="bucket" data-id="${i.categoryId}">
                     <strong>${esc(i.name)}${i.archived ? '<span class="paused">Paused</span>' : ''}</strong>
                   </button>
-                  <small>${i.worthStale
-                    ? 'New SIP/withdrawal logged — update current value'
-                    : i.historyComplete
-                      ? `Cost basis: ${money((i.putInPaise || 0) + (i.openingCostPaise || 0))}${commitment?.targetPaise ? ` · Plan: ${money(commitment.targetPaise)}/mo` : ''}`
-                      : 'Set opening history once to track gain / loss'}</small>
+                  <small>${commitment?.targetPaise ? `Monthly plan: ${money(commitment.targetPaise)}/mo · ` : ''}${i.worthStale
+                    ? 'New SIP/withdrawal logged — update market worth'
+                    : `SIPs logged: ${money(i.putInPaise || 0)}${i.openingCostPaise ? ` + Prior: ${money(i.openingCostPaise)}` : ''}`}</small>
                 </div>
                 <div class="investment-metrics">
                   <div class="investment-metric">
@@ -743,8 +802,12 @@ function investmentView() {
                     <strong>${money(cashInBucket)}</strong>
                   </div>
                   <div class="investment-metric">
-                    <span>Worth now</span>
-                    <strong>${i.worthPaise == null ? '—' : money(i.worthPaise)}</strong>
+                    <span>Total invested</span>
+                    <strong>${money(investedPrincipal)}</strong>
+                  </div>
+                  <div class="investment-metric">
+                    <span>Market worth</span>
+                    <strong>${i.worthPaise == null ? `${money(investedPrincipal)}*` : money(i.worthPaise)}</strong>
                   </div>
                   <div class="investment-metric">
                     <span>Gain / loss</span>
@@ -878,7 +941,7 @@ function planView() {
                   <div class="plan-section-title">
                     <span class="plan-type-icon" style="background:${esc(bt.color || '#23735f')}18">${esc(bt.icon || '🏷️')}</span>
                     <h3>${esc(bt.name)}</h3>
-                    <span class="plan-count">${items.length} bucket${items.length === 1 ? '' : 's'}</span>
+                    <span class="plan-count" data-bt-count="${esc(bt.id)}">${items.length} bucket${items.length === 1 ? '' : 's'}</span>
                     <span class="plan-type-subtotal" data-bt-subtotal="${esc(bt.id)}"></span>
                   </div>
                   <p>${esc(bt.description || '')}</p>
@@ -920,7 +983,7 @@ function planView() {
                   <div class="plan-section-title">
                     <span class="plan-type-icon" style="background:${esc(bt.color || '#6c8a45')}18">${esc(bt.icon || '🛒')}</span>
                     <h3>${esc(bt.name)}</h3>
-                    <span class="plan-count">${items.length} bucket${items.length === 1 ? '' : 's'}</span>
+                    <span class="plan-count" data-bt-count="${esc(bt.id)}">${items.length} bucket${items.length === 1 ? '' : 's'}</span>
                     <span class="plan-type-subtotal" data-bt-subtotal="${esc(bt.id)}"></span>
                   </div>
                   <p>${esc(bt.description || '')}</p>
@@ -949,10 +1012,15 @@ function planView() {
             <span>Send surplus to</span>
             <select name="surplus">
               <option value="">Keep in Unassigned</option>
-              ${active().filter(c => {
-                const bt = catBucketType(c);
-                return bt?.allowSurplus !== undefined ? bt.allowSurplus && !['bill', 'spending'].includes(type(c)) : ['saving', 'investment'].includes(type(c));
-              }).map(c => `<option value="${c.id}" ${s.surplusCategoryId === c.id ? 'selected' : ''}>${esc(c.name)} (${esc(catBucketType(c).name)})</option>`).join('')}
+              <optgroup label="Split equally across a bucket type">
+                ${allTypes.filter(bt => bt.allowSurplus && !['bill', 'spending'].includes(bt.behavior) && active().some(c => catBucketTypeId(c) === bt.id)).map(bt => `<option value="type:${esc(bt.id)}" ${s.surplusCategoryId === `type:${bt.id}` ? 'selected' : ''}>All buckets in ${esc(bt.name)} (split equally)</option>`).join('')}
+              </optgroup>
+              <optgroup label="Send 100% to a single bucket">
+                ${active().filter(c => {
+                  const bt = catBucketType(c);
+                  return bt?.allowSurplus !== undefined ? bt.allowSurplus && !['bill', 'spending'].includes(type(c)) : ['saving', 'investment'].includes(type(c));
+                }).map(c => `<option value="${c.id}" ${s.surplusCategoryId === c.id ? 'selected' : ''}>${esc(c.name)} (${esc(catBucketType(c).name)})</option>`).join('')}
+              </optgroup>
             </select>
           </label>
         </div>
@@ -1010,38 +1078,45 @@ function planRow(c) {
       <details id="${optionsId}" ${showOnboardingPaid ? 'open' : ''}>
         <summary hidden>Options</summary>
         <div class="plan-options">
-          <label class="field small-field">
-            <span>Icon</span>
-            <input name="rowIcon" value="${esc(c.icon || bt.icon || '🏷️')}" maxlength="4" aria-label="Icon">
-          </label>
-          <label class="field small-field">
-            <span>Color</span>
-            <input name="rowColor" type="color" value="${esc(c.color || bt.color || '#23735f')}" aria-label="Color">
-          </label>
-          ${sameKindTypes.length > 1 ? `
-            <label class="field">
-              <span>Bucket type</span>
-              <select name="rowBucketType">
-                ${sameKindTypes.map(item => `<option value="${esc(item.id)}" ${item.id === bt.id ? 'selected' : ''}>${esc(item.icon)} ${esc(item.name)}</option>`).join('')}
-              </select>
-            </label>` : ''}
-          <label class="check">
-            <input name="rollover" type="checkbox" ${c.rollover ? 'checked' : ''}>
-            Keep leftover cash for next month
-          </label>
-          ${amountField('Maximum bucket cap (optional)', 'cap', rupees(c.capPaise), false, 'No limit')}
-          ${['bill', 'loan'].includes(behavior) ? `
-            <label class="field">
-              <span>Due day of month (1–31)</span>
-              <input name="dueDay" type="number" min="1" max="31" step="1" placeholder="Optional" value="${c.dueDay || ''}">
+          <div class="plan-options-grid">
+            <label class="field small-field">
+              <span>Icon</span>
+              <input name="rowIcon" value="${esc(c.icon || bt.icon || '🏷️')}" maxlength="4" aria-label="Icon">
             </label>
-            ${app.data.settings.planConfirmed === false ? `
-              <label class="check highlight-check">
-                <input name="alreadyPaid" type="checkbox" ${paid ? 'checked' : ''}>
-                Already paid before starting balance
+            <label class="field small-field">
+              <span>Color</span>
+              <input name="rowColor" type="color" value="${esc(c.color || bt.color || '#23735f')}" aria-label="Color">
+            </label>
+            ${sameKindTypes.length > 1 ? `
+              <label class="field">
+                <span>Bucket type</span>
+                <select name="rowBucketType">
+                  ${sameKindTypes.map(item => `<option value="${esc(item.id)}" ${item.id === bt.id ? 'selected' : ''}>${esc(item.icon)} ${esc(item.name)}</option>`).join('')}
+                </select>
               </label>` : ''}
-          ` : ''}
-          ${button('Remove bucket', 'remove-row', c.balancePaise ? 'disabled title="Move the balance to another bucket first"' : '', 'small ghost')}
+            ${amountField('Maximum bucket cap (optional)', 'cap', rupees(c.capPaise), false, 'No limit')}
+            ${behavior === 'investment' ? amountField('Already invested before Khaata', 'openingCost', c.openingCostPaise ? rupees(c.openingCostPaise) : '', false, '0') : ''}
+            ${behavior === 'saving' ? amountField('Already saved outside this bank', 'openingSaved', c.openingSavedPaise ? rupees(c.openingSavedPaise) : '', false, '0') : ''}
+            ${['bill', 'loan'].includes(behavior) ? `
+              <label class="field">
+                <span>Due day of month (1–31)</span>
+                <input name="dueDay" type="number" min="1" max="31" step="1" placeholder="Optional" value="${c.dueDay || ''}">
+              </label>` : ''}
+          </div>
+          <div class="plan-options-bar">
+            <div class="plan-options-checks">
+              <label class="check">
+                <input name="rollover" type="checkbox" ${c.rollover ? 'checked' : ''}>
+                Keep leftover cash for next month
+              </label>
+              ${['bill', 'loan'].includes(behavior) && app.data.settings.planConfirmed === false ? `
+                <label class="check highlight-check">
+                  <input name="alreadyPaid" type="checkbox" ${paid ? 'checked' : ''}>
+                  Already paid before starting balance
+                </label>` : ''}
+            </div>
+            ${button('Remove bucket', 'remove-row', c.balancePaise ? 'disabled title="Move the balance to another bucket first"' : '', 'small ghost danger-text')}
+          </div>
         </div>
       </details>
     </div>`;
@@ -1156,6 +1231,8 @@ function collectPlan() {
         rollover: $('[name=rollover]', row).checked,
         capPaise: $('[name=cap]', row).value === '' ? null : paise($('[name=cap]', row).value),
         dueDay: Number($('[name=dueDay]', row)?.value) || null,
+        openingCostPaise: $('[name=openingCost]', row) && $('[name=openingCost]', row).value !== '' ? paise($('[name=openingCost]', row).value) : undefined,
+        openingSavedPaise: $('[name=openingSaved]', row) && $('[name=openingSaved]', row).value !== '' ? paise($('[name=openingSaved]', row).value) : undefined,
         alreadyPaid: Boolean($('[name=alreadyPaid]', row)?.checked),
         icon,
         color
@@ -1187,8 +1264,10 @@ function updatePlanTotal() {
   for (const section of $$('[data-bt-section]', f)) {
     const btId = section.dataset.btSection;
     const subtotalEl = $(`[data-bt-subtotal="${btId}"]`, section);
-    if (!subtotalEl) continue;
+    const countEl = $(`[data-bt-count="${btId}"]`, section);
     const rows = $$('.plan-line', section);
+    if (countEl) countEl.textContent = `${rows.length} bucket${rows.length === 1 ? '' : 's'}`;
+    if (!subtotalEl) continue;
     const bt = findBucketType(btId);
     if (bt?.kind === 'flex') {
       const pctSum = rows.reduce((n, r) => n + Number($('[name=percent]', r)?.value || 0), 0);
@@ -1437,30 +1516,27 @@ function settingsView() {
 /* ------------------------------------------------------------------ */
 
 function openBucketType({ id, defaultKind } = {}) {
-  if (app.dirty && !confirm('Save or discard your unsaved plan edits before configuring bucket types?')) return;
-  app.dirty = false;
   const bt = id ? findBucketType(id) : null;
   const initialBehavior = bt?.behavior || (defaultKind === 'flex' ? 'spending' : 'investment');
+  const isInitialFlex = initialBehavior === 'spending';
   const members = bt ? active().filter(c => catBucketTypeId(c) === bt.id) : [];
 
   modal(
     bt ? `Configure "${bt.name}" Type` : 'Add Bucket Type',
     `<form data-form="bucket-type" data-id="${esc(bt?.id || '')}" novalidate>
-      <div class="form-grid">
+      <div class="form-grid-icon-color">
         <label class="field">
           <span>Bucket type name</span>
           <input name="name" value="${esc(bt?.name || '')}" maxlength="40" placeholder="e.g. Subscriptions, Sinking Funds, Investments…" required>
         </label>
-        <div class="form-grid" style="grid-template-columns: 74px 1fr; gap: 10px">
-          <label class="field">
-            <span>Icon</span>
-            <input name="icon" value="${esc(bt?.icon || (initialBehavior === 'spending' ? '🛒' : '📈'))}" maxlength="4" required>
-          </label>
-          <label class="field">
-            <span>Accent color</span>
-            <input name="color" type="color" value="${esc(bt?.color || '#23735f')}">
-          </label>
-        </div>
+        <label class="field">
+          <span>Icon</span>
+          <input name="icon" value="${esc(bt?.icon || (initialBehavior === 'spending' ? '🛒' : '📈'))}" maxlength="4" required>
+        </label>
+        <label class="field">
+          <span>Color</span>
+          <input name="color" type="color" value="${esc(bt?.color || '#23735f')}">
+        </label>
       </div>
 
       <label class="field">
@@ -1470,7 +1546,7 @@ function openBucketType({ id, defaultKind } = {}) {
 
       <label class="field">
         <span>Accounting &amp; planning behavior</span>
-        <select name="behavior" ${bt && members.length ? 'disabled title="Remove or move existing buckets first to change behavior"' : ''}>
+        <select name="behavior">
           ${[
             ['bill', 'Fixed Monthly Bill — ₹ amount, tracks monthly bill due/paid status & due day'],
             ['loan', 'Fixed Loan / EMI — ₹ amount, tracks monthly EMI transfers & due day'],
@@ -1479,14 +1555,13 @@ function openBucketType({ id, defaultKind } = {}) {
             ['spending', 'Flexible Everyday Spending — % share of remaining salary, included in Safe to Spend']
           ].map(([val, label]) => `<option value="${val}" ${val === initialBehavior ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
-        ${bt && members.length ? `<input type="hidden" name="behavior" value="${esc(bt.behavior)}">` : ''}
       </label>
 
       <div class="bt-rules-box">
-        <span class="eyebrow">Configurable Rules for "${esc(bt?.name || 'this bucket type')}"</span>
+        <span class="eyebrow">Configurable Rules for ${esc(bt?.name || 'this bucket type')}</span>
         <label class="check">
           <input name="defaultRollover" type="checkbox" ${(bt ? bt.defaultRollover : ['saving', 'investment'].includes(initialBehavior)) ? 'checked' : ''}>
-          <strong>Roll over unused cash to next month</strong> (if unchecked, resets to target each month)
+          <span><strong>Roll over unused cash to next month</strong> (if unchecked, resets each month)</span>
         </label>
         <div class="form-grid">
           ${amountField('Default maximum cap (optional)', 'defaultCap', rupees(bt?.defaultCapPaise), false, 'No limit')}
@@ -1508,14 +1583,35 @@ function openBucketType({ id, defaultKind } = {}) {
         </label>
         <label class="check" data-bt-surplus ${['bill', 'spending'].includes(initialBehavior) ? 'hidden' : ''}>
           <input name="allowSurplus" type="checkbox" ${(bt ? bt.allowSurplus : !['bill', 'spending'].includes(initialBehavior)) ? 'checked' : ''}>
-          Allow buckets of this type to receive extra / surplus money
+          <span>Allow buckets of this type to receive extra / surplus money</span>
         </label>
         ${bt && members.length ? `
           <label class="check highlight-check">
             <input name="applyToExisting" type="checkbox" checked>
-            Apply these rules to all ${members.length} existing bucket${members.length === 1 ? '' : 's'} in ${esc(bt.name)}
+            <span>Apply these rules to all ${members.length} existing bucket${members.length === 1 ? '' : 's'} in ${esc(bt.name)}</span>
           </label>` : ''}
       </div>
+
+      ${!bt ? `
+        <div class="bt-rules-box">
+          <span class="eyebrow">First bucket in this type (optional)</span>
+          <div class="form-grid">
+            <label class="field">
+              <span>First bucket name <em>optional</em></span>
+              <input name="initialBucketName" maxlength="40" placeholder="e.g. Netflix, Gold ETF, Travel Fund…">
+            </label>
+            <div data-bt-init-target ${isInitialFlex ? 'hidden' : ''}>
+              ${amountField('Monthly amount', 'initialTarget', '', false, 'e.g. 2000')}
+            </div>
+            <div data-bt-init-percent ${isInitialFlex ? '' : 'hidden'}>
+              <label class="field">
+                <span>Spending share (%)</span>
+                <div class="money-input"><span>%</span><input name="initialPercent" type="number" min="0" max="100" step="1" value="10"></div>
+              </label>
+            </div>
+          </div>
+          <p class="fine">Leave blank if you want to add buckets to this type later.</p>
+        </div>` : ''}
 
       ${bt ? `
         <div class="transaction-tools">
@@ -1542,7 +1638,7 @@ function openQuickAddBucket(preferredTypeId) {
           ${bts.map(bt => `<option value="${esc(bt.id)}" ${bt.id === initialBt?.id ? 'selected' : ''}>${esc(bt.icon)} ${esc(bt.name)} (${bt.kind === 'flex' ? '% of remaining salary' : 'Fixed ₹ / month'})</option>`).join('')}
         </select>
       </label>
-      <div class="form-grid" style="grid-template-columns: 1fr 74px 84px">
+      <div class="form-grid-icon-color">
         <label class="field">
           <span>Bucket name</span>
           <input name="name" maxlength="40" placeholder="e.g. PPF, Gold ETF, Broadband, Travel…" required>
@@ -1569,7 +1665,7 @@ function openQuickAddBucket(preferredTypeId) {
         <span class="eyebrow">Bucket Rules (pre-filled from Bucket Type)</span>
         <label class="check">
           <input name="rollover" type="checkbox" ${initialBt?.defaultRollover ? 'checked' : ''}>
-          Keep leftover cash for next month
+          <span>Keep leftover cash for next month</span>
         </label>
         ${amountField('Maximum bucket cap (optional)', 'cap', rupees(initialBt?.defaultCapPaise), false, 'No limit')}
         <label class="field" data-quick-dueday ${['bill', 'loan'].includes(initialBt?.behavior) ? '' : 'hidden'}>
@@ -1891,31 +1987,63 @@ function openBucket(id) {
   const c = cat(id);
   const bt = catBucketType(c);
   const commitment = app.data.derived.commitments.find(i => i.categoryId === id);
+  const inv = app.data.derived.investments.find(i => i.categoryId === id);
   const row = app.data.derived.allocation?.items.find(i => i.categoryId === id && i.reason === 'target');
   const t = type(c);
   const bucketTxs = app.data.transactions
     .filter(tx => tx.categoryId === id && (tx.budgetPeriod || tx.date.slice(0, 7)) === app.period)
     .slice(0, 5);
 
+  const invNet = inv ? (inv.netInvestedPaise ?? Math.max(0, (inv.openingCostPaise || 0) + (inv.putInPaise || 0) - (inv.tookOutPaise || 0))) : 0;
+  const totalSaved = Math.max(0, c.balancePaise) + (c.openingSavedPaise || 0);
+  const headlineLabel = t === 'saving'
+    ? 'Total saved in this goal'
+    : t === 'investment'
+      ? (inv?.worthPaise != null ? 'Current market worth' : 'Total invested (principal)')
+      : t === 'spending'
+        ? 'Available in bucket'
+        : 'Cash set aside in bucket';
+  const headlineAmount = t === 'saving'
+    ? totalSaved
+    : t === 'investment'
+      ? (inv?.worthPaise ?? invNet)
+      : c.balancePaise;
+
   modal(
     `${c.icon || ''} ${c.name}`.trim(),
     `<div class="bucket-modal-summary">
        <div>
-         <span class="eyebrow">${esc(bt.name)} · ${t === 'spending' ? 'Available in bucket' : 'Cash set aside in bucket'}</span>
-         <p class="big-money ${c.balancePaise < 0 ? 'negative' : ''}">${money(c.balancePaise)}</p>
+         <span class="eyebrow">${esc(bt.name)} · ${headlineLabel}</span>
+         <p class="big-money ${headlineAmount < 0 ? 'negative' : ''}">${money(headlineAmount)}</p>
        </div>
        <div class="bucket-quick-actions">
-         ${button(t === 'spending' ? '+ Log expense' : ['bill', 'loan'].includes(t) ? 'Pay bill / EMI' : 'Log transfer', 'expense', `data-id="${id}"`, 'primary small')}
-         ${t === 'investment' ? button('Update worth', 'worth', `data-id="${id}"`, 'ghost small') : ''}
+         ${button(t === 'spending' ? '+ Log expense' : ['bill', 'loan'].includes(t) ? 'Pay bill / EMI' : t === 'investment' ? 'Record SIP / invest' : 'Log transfer', 'expense', `data-id="${id}"`, 'primary small')}
+         ${t === 'investment' ? button('Update worth / prior cost', 'worth', `data-id="${id}"`, 'ghost small') : ''}
          ${button('⇄ Move money', 'move', `data-to="${id}"`, 'ghost small')}
        </div>
      </div>
      <dl class="kv">
        <div><dt>Bucket type</dt><dd>${esc(bt.icon)} ${esc(bt.name)}</dd></div>
+       ${t === 'investment' ? `
+         <div><dt>Cash in bucket (waiting for SIP)</dt><dd>${money(c.balancePaise)}</dd></div>
+         <div><dt>Total invested (principal put in)</dt><dd>${money(invNet)}</dd></div>
+         ${inv?.worthPaise != null ? `<div><dt>Market gain / loss</dt><dd class="${inv.gainPaise > 0 ? 'positive' : inv.gainPaise < 0 ? 'negative' : ''}">${inv.gainPaise == null ? '—' : `${inv.gainPaise >= 0 ? '+' : ''}${money(inv.gainPaise)}`}</dd></div>` : ''}
+       ` : ''}
+       ${t === 'saving' ? `
+         <div><dt>Saved inside tracked bank account</dt><dd>${money(c.balancePaise)}</dd></div>
+         ${c.openingSavedPaise ? `<div><dt>Saved outside / before Khaata</dt><dd>${money(c.openingSavedPaise)}</dd></div>` : ''}
+       ` : ''}
        <div><dt>Monthly rule</dt><dd>${c.rollover ? 'Unused money rolls over to next month' : 'Resets every month'}</dd></div>
        ${c.capPaise != null ? `<div><dt>Maximum balance cap</dt><dd>${money(c.capPaise)}</dd></div>` : ''}
        ${row?.carryPaise ? `<div><dt>Carried from last month</dt><dd>${money(row.carryPaise)}</dd></div>` : ''}
      </dl>
+     ${t === 'saving' ? `
+       <form class="bill-status-form" data-form="saving-opening" data-id="${id}" novalidate>
+         <h3>Pre-existing / external savings</h3>
+         ${amountField('Amount already saved outside your tracked bank balance', 'openingSaved', c.openingSavedPaise ? rupees(c.openingSavedPaise) : '', false, '0')}
+         <p class="fine">If part of your current bank balance belongs to ${esc(c.name)}, use <strong>⇄ Move money</strong> to move it from Unassigned. Use this field for savings held in a separate FD or external account.</p>
+         ${actions('Save external amount')}
+       </form>` : ''}
      ${commitment && ['bill', 'loan'].includes(t) ? `
        <form class="bill-status-form" data-form="bill" data-id="${id}" novalidate>
          <h3>Bill status for ${monthName(app.period)}</h3>
@@ -2335,7 +2463,14 @@ document.addEventListener('submit', async event => {
       render();
       toast('Plan saved.');
     } else if (form === 'bucket-type') {
+      if (app.view === 'plan' && app.dirty && $('#plan-form')) {
+        try {
+          await change('/api/plan', collectPlan(), 'PUT');
+          app.dirty = false;
+        } catch {}
+      }
       const behavior = data.get('behavior');
+      const initialBucketName = String(data.get('initialBucketName') || '').trim();
       await change('/api/bucket-types', {
         id: f.dataset.id || undefined,
         name: data.get('name'),
@@ -2344,15 +2479,18 @@ document.addEventListener('submit', async event => {
         color: data.get('color'),
         behavior,
         defaultRollover: data.get('defaultRollover') === 'on',
-        defaultCapPaise: data.get('defaultCap') === '' ? null : paise(data.get('defaultCap')),
+        defaultCapPaise: data.get('defaultCap') === '' || data.get('defaultCap') === null ? null : paise(data.get('defaultCap')),
         defaultDueDay: data.get('defaultDueDay') ? Number(data.get('defaultDueDay')) : null,
         priority: Number(data.get('priority') || 2),
         allowSurplus: data.get('allowSurplus') === 'on',
-        applyToExisting: data.get('applyToExisting') === 'on'
+        applyToExisting: data.get('applyToExisting') === 'on',
+        initialBucketName: initialBucketName || undefined,
+        initialTargetPaise: initialBucketName ? paise(data.get('initialTarget') || 0) : undefined,
+        initialPercent: initialBucketName ? Number(data.get('initialPercent') || 10) : undefined
       });
       close();
       render();
-      toast('Bucket type saved.');
+      toast(f.dataset.id ? 'Bucket type updated.' : 'Bucket type created.');
     } else if (form === 'quick-bucket') {
       const btId = data.get('bucketTypeId');
       const bt = findBucketType(btId);
@@ -2360,26 +2498,31 @@ document.addEventListener('submit', async event => {
       const name = String(data.get('name') || '').trim();
       if (!name) throw new Error('Enter a bucket name.');
       const currentCats = active().map(c => ({ ...c }));
-      const newPercent = isFlex ? Math.max(0, Math.min(100, Number(data.get('percent') || 10))) : 0;
+      const flexCats = currentCats.filter(c => c.kind === 'flex');
+      const hasExistingFlex = flexCats.length > 0;
+      const newPercent = isFlex ? (hasExistingFlex ? Math.max(0, Math.min(100, Number(data.get('percent') || 10))) : 100) : 0;
 
-      if (isFlex) {
-        const flexCats = currentCats.filter(c => c.kind === 'flex');
-        if (!flexCats.length) {
-          // Only flex bucket: must be 100%
-        } else {
-          const remainder = Math.max(0, 100 - newPercent);
-          const oldSum = flexCats.reduce((n, c) => n + c.percent, 0);
-          let running = 0;
-          flexCats.forEach((c, idx) => {
-            if (idx === flexCats.length - 1) {
-              c.percent = Math.max(0, Math.round((remainder - running) * 100) / 100);
-            } else {
-              const nextP = oldSum > 0 ? Math.round(((c.percent / oldSum) * remainder) * 2) / 2 : Math.round((remainder / flexCats.length) * 2) / 2;
-              c.percent = nextP;
-              running += nextP;
-            }
-          });
-        }
+      if (isFlex && hasExistingFlex) {
+        const remainder = Math.max(0, 100 - newPercent);
+        const oldSum = flexCats.reduce((n, c) => n + c.percent, 0);
+        let running = 0;
+        flexCats.forEach((c, idx) => {
+          if (idx === flexCats.length - 1) {
+            c.percent = Math.max(0, Math.round((remainder - running) * 100) / 100);
+          } else {
+            const rawShare = oldSum > 0 ? Math.round(((c.percent / oldSum) * remainder) * 2) / 2 : Math.round((remainder / flexCats.length) * 2) / 2;
+            const nextP = Math.min(Math.max(0, remainder - running), Math.max(0, rawShare));
+            c.percent = nextP;
+            running += nextP;
+          }
+        });
+      }
+
+      const targetPaise = isFlex ? 0 : paise(data.get('target') || 0);
+      const rollover = data.get('rollover') === 'on';
+      let capPaise = data.get('cap') === '' || data.get('cap') === null ? null : paise(data.get('cap'));
+      if (!isFlex && rollover && capPaise !== null && capPaise < targetPaise) {
+        capPaise = targetPaise;
       }
 
       currentCats.push({
@@ -2387,10 +2530,10 @@ document.addEventListener('submit', async event => {
         type: bt?.behavior || 'bill',
         bucketTypeId: bt?.id || btId,
         name,
-        targetPaise: isFlex ? 0 : paise(data.get('target') || 0),
-        percent: isFlex ? (currentCats.some(c => c.kind === 'flex') ? newPercent : 100) : 0,
-        rollover: data.get('rollover') === 'on',
-        capPaise: data.get('cap') === '' ? null : paise(data.get('cap')),
+        targetPaise,
+        percent: newPercent,
+        rollover,
+        capPaise,
         dueDay: data.get('dueDay') ? Number(data.get('dueDay')) : null,
         icon: data.get('icon') || bt?.icon || '🏷️',
         color: data.get('color') || bt?.color || '#23735f'
@@ -2460,6 +2603,13 @@ document.addEventListener('submit', async event => {
       close();
       render();
       toast('Bill updated.');
+    } else if (form === 'saving-opening') {
+      await change(`/api/savings/${f.dataset.id}/opening`, {
+        openingSavedPaise: data.get('openingSaved') === '' ? 0 : paise(data.get('openingSaved'))
+      });
+      close();
+      render();
+      toast('Savings balance updated.');
     } else if (form === 'worth') {
       await change(`/api/investments/${f.dataset.id}/value`, {
         worthPaise: paise(data.get('worth')),
@@ -2538,9 +2688,25 @@ document.addEventListener('change', async event => {
     if (event.target.closest('[data-form=bucket-type]') && event.target.name === 'behavior') {
       const f = event.target.closest('[data-form=bucket-type]');
       const b = event.target.value;
-      $('[data-bt-dueday]', f).hidden = !['bill', 'loan'].includes(b);
-      $('[data-bt-surplus]', f).hidden = ['bill', 'spending'].includes(b);
+      const isFlex = b === 'spending';
+      if ($('[data-bt-dueday]', f)) $('[data-bt-dueday]', f).hidden = !['bill', 'loan'].includes(b);
+      if ($('[data-bt-surplus]', f)) $('[data-bt-surplus]', f).hidden = ['bill', 'spending'].includes(b);
+      if ($('[data-bt-init-target]', f)) $('[data-bt-init-target]', f).hidden = isFlex;
+      if ($('[data-bt-init-percent]', f)) $('[data-bt-init-percent]', f).hidden = !isFlex;
       f.elements.defaultRollover.checked = ['saving', 'investment'].includes(b);
+    }
+    if (event.target.name === 'rowBucketType') {
+      const row = event.target.closest('.plan-line');
+      const newBtId = event.target.value;
+      const bt = findBucketType(newBtId);
+      const targetList = $(`[data-plan-type="${newBtId}"]`);
+      if (row && bt && targetList) {
+        row.dataset.bucketType = bt.id;
+        row.dataset.type = bt.behavior;
+        targetList.appendChild(row);
+        app.dirty = true;
+        updatePlanTotal();
+      }
     }
     if (event.target.name === 'txType' || event.target.name === 'categoryId') updateTransactionFields();
     if (event.target.name === 'from') updateMoveWarning();

@@ -32,6 +32,7 @@ import {
   undoAllocation,
   updateTransaction,
   updateInvestmentValue,
+  updateSavingOpening,
 } from './lib/domain.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -557,6 +558,15 @@ async function handleApi(req, res, url) {
       body.worthPaise
     );
     if (Object.hasOwn(body, 'openingCostPaise')) updateInvestmentHistory(state, investmentValueMatch[1], body.openingCostPaise);
+    store.set(state);
+    return sendJson(res, 200, reply({ category }));
+  }
+
+  const savingOpeningMatch = pathname.match(/^\/api\/savings\/([^/]+)\/opening$/);
+  if (savingOpeningMatch && req.method === 'POST') {
+    const body = await readJson(req);
+    const state = structuredClone(store.get());
+    const category = updateSavingOpening(state, savingOpeningMatch[1], body.openingSavedPaise);
     store.set(state);
     return sendJson(res, 200, reply({ category }));
   }
